@@ -1,14 +1,18 @@
+// Scroll layout: each scene owns a slice of the 0..1 progress, transitions sit on the cuts.
 export const SECTIONS = [
-  { id: 'origin', label: 'ORIGIN', range: [0, 0.06], jump: 0 },
-  { id: 'structure', label: 'STRUCTURE', range: [0.14, 0.34], jump: 0.2 },
-  { id: 'passage', label: 'PASSAGE', range: [0.44, 0.6], jump: 0.5 },
-  { id: 'ventures', label: 'VENTURES', range: [0.66, 0.84], jump: 0.75 },
-  { id: 'manifesto', label: 'MANIFESTO', range: [0.88, 1.01], jump: 1 },
+  { id: 'origin', label: 'ORIGIN', jump: 0 },
+  { id: 'ventures', label: 'VENTURES', jump: 0.28 },
+  { id: 'passage', label: 'PASSAGE', jump: 0.5 },
+  { id: 'contact', label: 'CONTACT', jump: 1 },
 ];
+export const CUTS = [0.18, 0.42, 0.78];
+
+export const MISSION =
+  'Our mission is to build systems that keep their shape through the long winter: durable identity, memory and tools for communities.';
 
 export const VENTURES = [
   {
-    code: 'FROST_CO',
+    code: 'VENTURE_CO_01',
     name: 'Whiteout',
     tag: 'Signal / Identity',
     summary:
@@ -16,7 +20,7 @@ export const VENTURES = [
     meta: [['Founded', '2023'], ['Stage', 'Live'], ['Focus', 'Identity']],
   },
   {
-    code: 'FROST_CO',
+    code: 'VENTURE_CO_02',
     name: 'Permafrost',
     tag: 'Storage / Memory',
     summary:
@@ -24,7 +28,7 @@ export const VENTURES = [
     meta: [['Founded', '2024'], ['Stage', 'Beta'], ['Focus', 'Archival']],
   },
   {
-    code: 'FROST_CO',
+    code: 'VENTURE_CO_03',
     name: 'Rime',
     tag: 'Tools / Creators',
     summary:
@@ -33,8 +37,19 @@ export const VENTURES = [
   },
 ];
 
-export const MANIFESTO = [
-  'Most things built for the internet melt the moment attention moves on.',
-  'We build for the long winter instead: systems that keep their shape when nobody is watching, and communities that hold together under pressure.',
-  'Slow to form. Hard to break. Clear all the way through.',
+// Replace the hrefs with FROST's real profiles.
+export const LINKS = [
+  { label: 'Medium', glyph: 'M', href: 'https://medium.com/' },
+  { label: 'LinkedIn', glyph: 'in', href: 'https://www.linkedin.com/' },
+  { label: 'X / Twitter', glyph: 'X', href: 'https://x.com/' },
+];
+
+// Large blurred telemetry rows floating behind the crystal and platform scenes.
+export const GHOST_ROWS = [
+  'PRE LOAD OFF  //  2026',
+  'TEMP -32.18  CORE 04',
+  'ICE / SHEET 7  NOMINAL',
+  'LAT 78.2232 N  LON 15.6267 E',
+  'OPTICAL POS  00.4471',
+  'DRIFT 0.03 M  /  H',
 ];

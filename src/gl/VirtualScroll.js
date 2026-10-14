@@ -12,13 +12,13 @@ export class VirtualScroll {
       e.preventDefault();
       if (!this.enabled) return;
       const unit = e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? window.innerHeight : 1;
-      this.target += Math.max(-120, Math.min(120, e.deltaY * unit)) * 0.00032;
+      this.target += Math.max(-120, Math.min(120, e.deltaY * unit)) * 0.00018;
     };
     this._touchStart = (e) => { touchY = e.touches[0].clientY; };
     this._touchMove = (e) => {
       if (!this.enabled) return;
       const y = e.touches[0].clientY;
-      this.target += (touchY - y) * 0.0011;
+      this.target += (touchY - y) * 0.0007;
       touchY = y;
     };
     this._key = (e) => {

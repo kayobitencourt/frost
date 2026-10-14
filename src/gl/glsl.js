@@ -22,7 +22,7 @@ float fbm(vec3 p) {
 
 // Distance fades into a cold grey-blue whiteout (linear #aeb8c5).
 export const fog = /* glsl */ `
-const vec3 FOG = vec3(0.42, 0.48, 0.56);
+const vec3 FOG = vec3(0.47, 0.5, 0.55);
 float fogFactor(vec3 w) {
   return 1.0 - smoothstep(30.0, 90.0, length(cameraPosition - w));
 }
@@ -45,19 +45,19 @@ float gustAt(vec2 p) {
 }
 `;
 
-// Snow field height: soft dunes, a packed pad round the igloo, a flat lane
-// for the camera and wind ripples that creep downwind.
+// Snow field height: rolling hills and rocky lumps, a packed seat for the igloo
+// and wind ripples that creep downwind.
 export const terrain = /* glsl */ `
 float snowHeight(vec2 p) {
-  float dunes = fbm(vec3(p * 0.05, 0.0)) * 2.4 - 1.0;
-  float pad = smoothstep(5.5, 13.0, length(p));
-  float lane = mix(1.0, smoothstep(2.5, 8.0, abs(p.x)), step(p.y, 4.0) * step(-68.0, p.y));
+  float hills = (fbm(vec3(p * 0.035, 0.0)) - 0.5) * 8.0;
+  float lumps = (fbm(vec3(p * 0.24, 5.0)) - 0.5) * 1.8;
+  float pad = smoothstep(5.0, 12.0, length(p));
   float along = dot(p, WIND);
   float across = dot(p, vec2(-WIND.y, WIND.x));
   float ripple = sin(along * 3.4 - uWindT * 0.6 + noise(vec3(p * 0.45, 0.0)) * 5.0);
   // sastrugi: sharp wind-carved ridges stretched along the wind
   float sas = pow(1.0 - abs(noise(vec3(along * 0.3, across * 1.5, 3.0)) * 2.0 - 1.0), 5.0);
-  return dunes * pad * lane * 1.15 + ripple * 0.03 * (0.4 + pad * 0.6) + sas * 0.12 * (0.3 + pad * 0.7);
+  return (hills + lumps) * pad + ripple * 0.02 * (0.4 + pad * 0.6) + sas * 0.06 * (0.3 + pad * 0.7);
 }
 `;
 
@@ -84,8 +84,8 @@ vec2 voronoi(vec3 p) {
 export const sky = /* glsl */ `
 vec3 skyColor(vec3 d) {
   vec3 sun = normalize(vec3(-0.5, 0.62, 0.6));
-  vec3 zenith = vec3(0.26, 0.35, 0.48);
-  vec3 horizon = vec3(0.46, 0.52, 0.6);
+  vec3 zenith = vec3(0.36, 0.4, 0.47);
+  vec3 horizon = vec3(0.5, 0.53, 0.58);
   vec3 c = mix(horizon, zenith, smoothstep(0.0, 0.7, d.y));
   float az = atan(d.z, d.x);
   float ridge = 0.05 + 0.06 * (sin(az * 3.0) * 0.5 + 0.5) * (0.6 + 0.4 * sin(az * 11.0 + 1.3));
