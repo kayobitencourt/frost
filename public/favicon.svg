@@ -1,29 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#c9d0d8"/>
-      <stop offset="0.55" stop-color="#9aa4b1"/>
-      <stop offset="1" stop-color="#6f7a88"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#36424f"/>
+      <stop offset="1" stop-color="#141a22"/>
     </linearGradient>
-    <radialGradient id="glow" cx="0.32" cy="0.25" r="0.8">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.45"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    <radialGradient id="halo" cx="0.5" cy="0.46" r="0.5">
+      <stop offset="0" stop-color="#cfe0f2" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#cfe0f2" stop-opacity="0"/>
     </radialGradient>
-    <g id="arm" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M32 32V9"/>
-      <path d="M32 15.5l-5.5-5.5M32 15.5l5.5-5.5"/>
-      <path d="M32 23l-4.5-4.5M32 23l4.5-4.5"/>
-    </g>
   </defs>
-  <rect width="64" height="64" rx="15" fill="url(#bg)"/>
-  <rect width="64" height="64" rx="15" fill="url(#glow)"/>
-  <g>
-    <use href="#arm"/>
-    <use href="#arm" transform="rotate(60 32 32)"/>
-    <use href="#arm" transform="rotate(120 32 32)"/>
-    <use href="#arm" transform="rotate(180 32 32)"/>
-    <use href="#arm" transform="rotate(240 32 32)"/>
-    <use href="#arm" transform="rotate(300 32 32)"/>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <circle cx="32" cy="30" r="26" fill="url(#halo)"/>
+  <!-- a faceted ice crystal, leaning slightly, lit from the upper left -->
+  <g transform="rotate(-14 32 32)" stroke-linejoin="round">
+    <path d="M32 6 L45 19 L32 26 L19 19 Z" fill="#f7fbff"/>
+    <path d="M19 19 L32 26 L32 58 L19 44 Z" fill="#d3deea"/>
+    <path d="M32 26 L45 19 L45 44 L32 58 Z" fill="#8798ad"/>
+    <path d="M32 6 L45 19 L45 44 L32 58 L19 44 L19 19 Z" fill="none" stroke="#ffffff" stroke-opacity="0.9" stroke-width="1.2"/>
+    <path d="M32 26 V58" stroke="#ffffff" stroke-opacity="0.55" stroke-width="0.8"/>
+    <path d="M23 24 L23 40" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" stroke-opacity="0.85"/>
   </g>
-  <circle cx="32" cy="32" r="3.2" fill="#fff"/>
+  <!-- glint -->
+  <path d="M48 11 l1.2 3.3 3.3 1.2 -3.3 1.2 -1.2 3.3 -1.2 -3.3 -3.3 -1.2 3.3 -1.2 z" fill="#ffffff"/>
 </svg>
