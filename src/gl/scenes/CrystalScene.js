@@ -2,7 +2,11 @@ import * as THREE from 'three';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
+import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
+import fontData from 'three/examples/fonts/helvetiker_bold.typeface.json';
 import { createBackdrop } from '../Backdrop.js';
+import { VENTURES } from '../../content.js';
 import { callouts, hoverCrystal } from '../../state.js';
 import { sound } from '../../audio/Sound.js';
 import { smooth, damp } from '../util.js';
@@ -99,17 +103,25 @@ function frostTextures(size = 512) {
 }
 
 // Rough ice chunk: convex hull of jittered points on a stretched ellipsoid, box-projected uvs.
+// The hull's face planes are kept so whatever is frozen inside can be fitted to it.
 function crystalGeometry() {
   const pts = [];
   while (pts.length < 90) {
     const v = new THREE.Vector3(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1));
     if (v.lengthSq() > 1 || v.lengthSq() < 0.05) continue;
-    v.normalize().multiply(new THREE.Vector3(0.8, 1.4, 0.75)).multiplyScalar(rnd(0.8, 1));
+    v.normalize().multiply(new THREE.Vector3(0.82, 1.4, 0.8)).multiplyScalar(rnd(0.9, 1));
     pts.push(v);
   }
   const geo = new ConvexGeometry(pts);
   const pos = geo.getAttribute('position');
   const nor = geo.getAttribute('normal');
+  const planes = [];
+  for (let i = 0; i < pos.count; i += 3) {
+    const n = new THREE.Vector3().fromBufferAttribute(nor, i);
+    const d = n.dot(new THREE.Vector3().fromBufferAttribute(pos, i));
+    planes.push(d < 0 ? { n: n.negate(), d: -d } : { n, d });
+  }
+  geo.userData.planes = planes;
   const uv = new Float32Array(pos.count * 2);
   for (let i = 0; i < pos.count; i++) {
     const nx = Math.abs(nor.getX(i));
@@ -123,32 +135,78 @@ function crystalGeometry() {
   return geo;
 }
 
-// What is frozen inside each venture's crystal.
-function artefact(i, material) {
+const roundedRect = (w, h, r) => {
+  const s = new THREE.Shape();
+  const x = -w / 2;
+  const y = -h / 2;
+  s.moveTo(x + r, y);
+  s.lineTo(x + w - r, y);
+  s.quadraticCurveTo(x + w, y, x + w, y + r);
+  s.lineTo(x + w, y + h - r);
+  s.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  s.lineTo(x + r, y + h);
+  s.quadraticCurveTo(x, y + h, x, y + h - r);
+  s.lineTo(x, y + r);
+  s.quadraticCurveTo(x, y, x + r, y);
+  return s;
+};
+
+// What is frozen inside each venture's crystal: a plaque with its mark in relief.
+function plaque(glyph, font, plate, relief) {
   const g = new THREE.Group();
-  if (i === 0) {
-    g.add(new THREE.Mesh(new THREE.TorusKnotGeometry(0.4, 0.13, 160, 18, 2, 3), material));
-  } else if (i === 1) {
-    for (let k = 0; k < 4; k++) {
-      const m = new THREE.Mesh(new RoundedBoxGeometry(0.78, 0.2, 0.52, 3, 0.05), material);
-      m.position.y = (k - 1.5) * 0.27;
-      m.rotation.y = k * 0.35;
-      g.add(m);
-    }
-  } else {
-    g.add(new THREE.Mesh(new THREE.IcosahedronGeometry(0.42, 0), material));
-    for (let k = 0; k < 4; k++) {
-      const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.12, 0), material);
-      const a = (k / 4) * Math.PI * 2;
-      m.position.set(Math.cos(a) * 0.68, Math.sin(a * 2) * 0.25, Math.sin(a) * 0.68);
-      g.add(m);
-    }
-  }
+  g.add(new THREE.Mesh(new RoundedBoxGeometry(1.0, 1.2, 0.16, 4, 0.05), plate));
+  const ring = roundedRect(0.86, 1.06, 0.14);
+  ring.holes.push(roundedRect(0.68, 0.88, 0.08));
+  const bevel = { bevelEnabled: true, bevelThickness: 0.02, bevelSize: 0.015, bevelSegments: 2, curveSegments: 6 };
+  const frame = new THREE.Mesh(new THREE.ExtrudeGeometry(ring, { depth: 0.05, ...bevel }), relief);
+  frame.position.z = 0.07;
+  const text = new TextGeometry(glyph, { font, size: 0.46, depth: 0.05, ...bevel });
+  text.computeBoundingBox();
+  const c = text.boundingBox.getCenter(new THREE.Vector3());
+  text.translate(-c.x, -c.y, 0);
+  const mark = new THREE.Mesh(text, relief);
+  mark.position.z = 0.07;
+  g.add(frame, mark);
   return g;
 }
 
+// Largest uniform scale at which every corner of `box` stays inside the hull, with a margin.
+function fitInside(box, planes, margin = 0.85) {
+  let k = Infinity;
+  const p = new THREE.Vector3();
+  for (let i = 0; i < 8; i++) {
+    p.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z);
+    for (const { n, d } of planes) {
+      const reach = n.dot(p);
+      if (reach > 1e-6) k = Math.min(k, (d * margin) / reach);
+    }
+  }
+  return k;
+}
+
+// Fine triangulated skin laid over the hull, drawn while the crystal is hovered.
+function hullWire(planes) {
+  const geo = new THREE.IcosahedronGeometry(1, 6);
+  const pos = geo.getAttribute('position');
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).normalize();
+    let reach = Infinity;
+    for (const { n, d } of planes) {
+      const k = n.dot(v);
+      if (k > 1e-6) reach = Math.min(reach, d / k);
+    }
+    v.multiplyScalar(reach * 1.004);
+    pos.setXYZ(i, v.x, v.y, v.z);
+  }
+  const material = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false });
+  return new THREE.LineSegments(new THREE.WireframeGeometry(geo), material);
+}
+
+const inside = (v, planes, margin) => planes.every(({ n, d }) => n.dot(v) < d * margin);
+
 // Air bubbles and specks trapped in the ice; refracted through the crystal's faces.
-function inclusions() {
+function inclusions(planes) {
   const n = 260;
   const mesh = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 2), new THREE.MeshBasicMaterial({ color: 0xf4f8ff }), n);
   const m = new THREE.Matrix4();
@@ -156,6 +214,7 @@ function inclusions() {
     const v = new THREE.Vector3(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1));
     if (v.lengthSq() > 1) { i--; continue; }
     v.multiply(new THREE.Vector3(0.55, 1.05, 0.5));
+    if (!inside(v, planes, 0.88)) { i--; continue; }
     const s = Math.pow(Math.random(), 3) * 0.035 + 0.006;
     m.makeScale(s, s * rnd(0.8, 1.6), s).setPosition(v);
     mesh.setMatrixAt(i, m);
@@ -220,10 +279,25 @@ function constellation() {
   lg.setAttribute('position', new THREE.Float32BufferAttribute(seg, 3));
   const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, depthWrite: false });
   const pg = new THREE.BufferGeometry().setFromPoints(pts);
-  const pointMat = new THREE.PointsMaterial({ color: 0xffffff, size: 3, sizeAttenuation: false, transparent: true, opacity: 0.9, depthWrite: false });
+  // nodes are drawn as small + crosshairs
+  const pointMat = new THREE.ShaderMaterial({
+    uniforms: { uOpacity: { value: 0 }, uSize: { value: 10 } },
+    vertexShader: /* glsl */ `
+      uniform float uSize;
+      void main() { gl_PointSize = uSize; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: /* glsl */ `
+      uniform float uOpacity;
+      void main() {
+        vec2 c = abs(gl_PointCoord - 0.5);
+        if (min(c.x, c.y) > 0.05) discard;
+        gl_FragColor = vec4(vec3(1.0), uOpacity);
+      }`,
+    transparent: true,
+    depthWrite: false,
+  });
   const g = new THREE.Group();
   g.add(new THREE.LineSegments(lg, lineMat), new THREE.Points(pg, pointMat));
-  return { group: g, materials: [lineMat, pointMat] };
+  return { group: g, lineMat, pointMat };
 }
 
 export class CrystalScene {
@@ -243,7 +317,9 @@ export class CrystalScene {
     this.scene.add(key);
 
     const { normal, rough } = frostTextures();
-    const inner = new THREE.MeshStandardMaterial({ color: 0xaab3bd, roughness: 0.55, metalness: 0.05 });
+    const plate = new THREE.MeshStandardMaterial({ color: 0x6d7886, roughness: 0.6, metalness: 0.05 });
+    const relief = new THREE.MeshStandardMaterial({ color: 0xdfe5ec, roughness: 0.45, metalness: 0.05 });
+    const font = new FontLoader().parse(fontData);
     this.crystals = [];
     for (let i = 0; i < COUNT; i++) {
       const material = new THREE.MeshPhysicalMaterial({
@@ -265,28 +341,36 @@ export class CrystalScene {
         clearcoatRoughness: 0.2,
         specularIntensity: 1,
       });
-      const mesh = new THREE.Mesh(crystalGeometry(), material);
+      const geo = crystalGeometry();
+      const { planes } = geo.userData;
+      const mesh = new THREE.Mesh(geo, material);
       mesh.userData.index = i;
-      const art = artefact(i, inner);
-      const bubbles = inclusions();
+      // the plaque is sized to the hull it is frozen in, so no corner ever breaks the surface
+      const art = plaque(VENTURES[i].name[0], font, plate, relief);
+      art.scale.setScalar(Math.min(1.2, fitInside(new THREE.Box3().setFromObject(art), planes)));
+      const bubbles = inclusions(planes);
+      const wire = hullWire(planes);
       const net = constellation();
       const group = new THREE.Group();
       const spin = new THREE.Group();
-      spin.add(mesh, art, bubbles);
+      spin.add(mesh, art, bubbles, wire);
       group.add(spin, net.group);
       group.position.set(X_OFF[i], -i * SPACING, 0);
       group.scale.setScalar(1.25);
       this.scene.add(group);
-      this.crystals.push({ group, spin, mesh, art, net, material, hover: 0, seen: false });
+      this.crystals.push({ group, spin, mesh, art, wire, net, material, hover: 0, seen: false, angle: i * 2.1 });
     }
 
     this.dust = iceDust();
     this.scene.add(this.dust.points);
     this.raycaster = new THREE.Raycaster();
     this.hovered = -1;
-    this.focus = { v: 0, index: -1 };
+    // v: camera push onto the opened crystal, frost: its surface icing over before the cut,
+    // blur: the crystal drifting out of focus; hud: the leaders (they glitch out towards 0)
+    this.focus = { v: 0, frost: 0, blur: 0, index: -1 };
+    this.hud = { v: 1 };
     this.calloutsVisible = false;
-    this.post = { zoom: 0, aberr: 0, warp: 0, dof: { focus: 8.4, aperture: 0.9 } };
+    this.post = { zoom: 0, aberr: 0, warp: 0, dark: 0, dof: { focus: 8.4, aperture: 0.9 } };
     this._v = new THREE.Vector3();
   }
 
@@ -296,15 +380,17 @@ export class CrystalScene {
     this.camera.updateProjectionMatrix();
     this.backdrop.material.uniforms.uRes.value.set(w, h);
     this.dust.material.uniforms.uPixel.value = (h * pixel * 0.5) / Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+    for (const c of this.crystals) c.net.pointMat.uniforms.uSize.value = 10 * pixel;
   }
 
   // Camera height for scroll s: keeps moving, but lingers while a crystal is centred.
   cameraY(s) {
-    // the first crystal takes its time rising out of the cloud
-    const u = THREE.MathUtils.clamp(s, -0.2, 1.2) * COUNT * 1.05 - 0.4;
+    // the first crystal rises out of the fog; the last one leaves through the top of the
+    // frame while the camera tilts down to the portal
+    const u = THREE.MathUtils.clamp(s, -0.3, 1.2) * (COUNT + 1) - 0.66;
     const k = Math.floor(u);
     const f = u - k;
-    const g = k + f + 0.12 * Math.sin(Math.PI * 2 * f);
+    const g = k + f + 0.1 * Math.sin(Math.PI * 2 * f);
     return 5.5 - g * SPACING;
   }
 
@@ -321,15 +407,22 @@ export class CrystalScene {
     const cam = this.camera;
     let y = this.cameraY(s);
     if (this.focus.index >= 0) y += (-this.focus.index * SPACING - y) * this.focus.v;
-    cam.position.set(mouseLerp.x * 0.4 + this.focus.v * 1.4, y + mouseLerp.y * 0.25, 8.4 - this.focus.v * 1.6);
-    cam.lookAt(this.focus.v * 1.4, y, 0);
+    // opened: the crystal is centred behind the project text
+    const fv = this.focus.v;
+    cam.position.set(mouseLerp.x * 0.4 * (1 - fv), y + mouseLerp.y * 0.25 * (1 - fv), 8.4 - fv * 3.4);
+    cam.lookAt(0, y, 0);
     cam.updateMatrixWorld();
 
     const bu = this.backdrop.material.uniforms;
     bu.uTime.value = t;
     bu.uOffset.value.set(mouseLerp.x * 0.01, -y * 0.045);
     this.dust.material.uniforms.uTime.value = t;
-    this.post.dof.focus = cam.position.distanceTo(this._v.set(this.focus.v * 1.4, y, 0));
+    // pushing in, the crystal itself slides out of focus
+    const blur = this.focus.blur;
+    this.post.dof.focus = cam.position.distanceTo(this._v.set(0, y, 0)) * (1 + blur * 0.9);
+    this.post.dof.aperture = 0.9 + blur * 2.2;
+    // the frosting crystal splits into a prismatic fringe just before the cut to dark
+    this.post.aberr = this.focus.frost * 0.012 * (1 - this.post.dark);
 
     // hover
     let hit = -1;
@@ -350,27 +443,38 @@ export class CrystalScene {
       c.hover += (target - c.hover) * damp(dt, 6);
       const cy = -i * SPACING + Math.sin(t * 0.6 + i * 2) * 0.12;
       const rel = cy - y;
-      c.group.position.y = cy;
+      const open = i === this.focus.index ? fv : 0;
+      const frost = i === this.focus.index ? this.focus.frost : 0;
+      c.group.position.set(X_OFF[i] * (1 - open), cy, 0);
       c.group.rotation.z = TILT[i] + rel * 0.03;
-      c.spin.rotation.y = t * 0.18 + i * 2.1 + mouseLerp.x * 0.35 + c.hover * 0.6;
-      c.spin.rotation.x = rel * 0.05 + mouseLerp.y * 0.15;
-      c.art.rotation.y = -t * 0.3;
+      // the opened crystal all but stops turning
+      c.angle += dt * 0.18 * (1 - open * 0.85);
+      c.spin.rotation.y = c.angle + mouseLerp.x * 0.35 * (1 - open) + c.hover * 0.6;
+      c.spin.rotation.x = rel * 0.05 + mouseLerp.y * 0.15 * (1 - open);
       c.net.group.rotation.y = -t * 0.05 + i;
-      c.group.scale.setScalar(1.25 * (1 + c.hover * 0.06));
-      c.mesh.material.roughness = 1 - c.hover * 0.25;
+      c.group.scale.setScalar(1.25 * (1 + c.hover * 0.06 + frost * 0.04));
+      c.mesh.material.roughness = 1 - c.hover * 0.25 * (1 - frost);
+      c.mesh.material.normalScale.setScalar(0.9 + frost * 2.6);
+      c.mesh.material.iridescence = 0.35 + c.hover * 0.4;
+      c.wire.material.opacity = c.hover * 0.28 * (1 - open);
+      c.wire.visible = c.wire.material.opacity > 0.002;
 
       // the crystal nearest the centre carries the HUD
       const near = 1 - smooth(2.2, 3.6, Math.abs(rel));
-      for (const m of c.net.materials) m.opacity = (m.isPointsMaterial ? 0.9 : 0.35 + 0.15 * Math.sin(t * 2.2 + i)) * near;
-      c.net.materials[1].size = 3 + Math.sin(t * 3 + i * 1.7) * 1.2;
+      const hud = this.hud.v;
+      c.net.lineMat.opacity = (0.35 + 0.15 * Math.sin(t * 2.2 + i)) * near * hud;
+      c.net.pointMat.uniforms.uOpacity.value = 0.9 * near * hud;
       if (near > 0.5 && !c.seen) {
         c.seen = true;
         sound.beeps(5);
       } else if (near < 0.1) c.seen = false;
-      if (near > 0.5 && this.focus.v < 0.5) {
+      if (near > 0.5 && hud > 0.01) {
         ANCHORS.forEach((a, k) => {
           const v = c.group.localToWorld(this._v.set(...a.p)).project(cam);
+          // each label only comes up once its anchor is well inside the frame
+          if (v.y < -0.86 || v.y > 0.84) return;
           list.push({
+            fx: 1 - hud,
             key: `${i}-${k}`,
             crystal: i,
             side: a.side,

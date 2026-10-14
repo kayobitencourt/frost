@@ -4,22 +4,18 @@
   import { Experience } from './gl/Experience.js';
   import { sound } from './audio/Sound.js';
   import { progress, sceneIndex, project, domeLabels, callouts, hoverCrystal, linkIndex } from './state.js';
-  import { scramble } from './lib/scramble.js';
+  import { scramble, lens } from './lib/scramble.js';
   import { VENTURES, LINKS, MISSION, GHOST_ROWS } from './content.js';
 
   let canvas;
   let exp;
   let load = { pct: 0 };
   let pct = 0;
-  let ready = false;
   let started = false;
   let leaving = false;
   let soundOn = false;
-  let cursor = { x: -100, y: -100 };
-  const cursorLerp = { x: -100, y: -100 };
-  let cursorEl;
   let vw = 1600;
-  let temps = VENTURES.map(() => ({ t: 32 + Math.random() * 4, d: Math.random() * 0.2 }));
+  let temps = VENTURES.map(() => ({ t: 32 + Math.random() * 4, d: 1 + Math.random() }));
 
   $: scene = $sceneIndex;
   $: inHero = started && scene === 0 && $progress < 0.06;
@@ -32,7 +28,14 @@
   $: shownCallouts = narrow ? $callouts.filter((c) => c.side !== 'r') : $callouts;
 
   const pad = (n, l = 3) => String(Math.round(n)).padStart(l, '0');
-  const stage = (v) => v.meta.find(([k]) => k === 'Stage')[1];
+  // Boot readout: a crest of ++ with == shoulders sweeping along a row of dashes.
+  const ascii = (v) => {
+    const head = (v / 100) * 10;
+    return Array.from({ length: 10 }, (_, i) => {
+      const d = Math.abs(i + 0.5 - head);
+      return d < 1 ? '+' : d < 2.5 ? '=' : '-';
+    }).join('');
+  };
 
   onMount(() => {
     exp = new Experience(canvas);
@@ -41,18 +44,16 @@
     const fonts = document.fonts ? document.fonts.ready : Promise.resolve();
     gsap.to(load, {
       pct: 100,
-      duration: 2.4,
-      ease: 'power2.inOut',
+      duration: 1.6,
+      ease: 'power1.inOut',
       onUpdate: () => (pct = load.pct),
-      onComplete: () => fonts.then(() => (ready = true)),
+      // no gate: the experience starts on its own, silent until Sound is switched on
+      onComplete: () => fonts.then(enter),
     });
 
     let raf;
     let lastTemp = 0;
     const loop = (now) => {
-      cursorLerp.x += (cursor.x - cursorLerp.x) * 0.2;
-      cursorLerp.y += (cursor.y - cursorLerp.y) * 0.2;
-      if (cursorEl) cursorEl.style.transform = `translate(${cursorLerp.x}px,${cursorLerp.y}px)`;
       if (now - lastTemp > 120) {
         lastTemp = now;
         temps = temps.map((x) => ({ t: x.t + (Math.random() - 0.5) * 0.08, d: Math.abs(x.d + (Math.random() - 0.5) * 0.02) }));
@@ -60,35 +61,26 @@
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
-    const move = (e) => (cursor = { x: e.clientX, y: e.clientY });
     const key = (e) => {
       if (e.key === 'Escape' && $project >= 0) closeProject();
       if ($sceneIndex === 3 && e.key === 'ArrowLeft') step(-1);
       if ($sceneIndex === 3 && e.key === 'ArrowRight') step(1);
     };
-    window.addEventListener('pointermove', move);
     window.addEventListener('keydown', key);
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener('pointermove', move);
       window.removeEventListener('keydown', key);
       exp.dispose();
     };
   });
 
-  function enter(withSound) {
+  function enter() {
     if (leaving) return;
     leaving = true;
-    if (withSound) {
-      sound.start();
-      soundOn = true;
-      sound.click();
-      sound.logo();
-    }
     setTimeout(() => {
       started = true;
       exp.start();
-    }, 600);
+    }, 500);
   }
 
   function toggleSound() {
@@ -119,14 +111,16 @@
     exp.setFocus(-1);
   }
 
-  // Callout leader: anchor on the crystal -> elbow -> underline the label sits on.
+  // Callout leaders, as on the reference: the name sits on an underline that kinks 45°
+  // down onto the crystal; the date sits on a flat line leaving the crystal sideways;
+  // the temperature readout floats free, with no line at all.
   const LEAD = {
-    tl: { dx: -70, dy: -60, len: -150 },
-    r: { dx: 60, dy: -36, len: 90 },
-    br: { dx: 70, dy: 50, len: 130 },
+    tl: { dx: -76, dy: -76, len: -128 },
+    r: { dx: 34, dy: -14, len: 0 },
+    br: { dx: 0, dy: 0, len: 186 },
   };
   function leader(c) {
-    const k = narrow ? 0.45 : 1;
+    const k = narrow ? 0.55 : 1;
     const l = LEAD[c.side];
     const ex = c.x + l.dx * k;
     const ey = c.y + l.dy * k;
@@ -136,28 +130,12 @@
 </script>
 
 <svelte:window bind:innerWidth={vw} />
-<canvas bind:this={canvas} class="gl"></canvas>
+<canvas bind:this={canvas} class="gl" class:pointer={$hoverCrystal >= 0 && $project < 0}></canvas>
 
 <!-- ======================= LOADER ======================= -->
 {#if !started}
-  <div class="loader" class:out={leaving}>
-    <div class="loader-inner">
-      <div class="loader-top">
-        <span>// FROST SYSTEM BOOT</span>
-        <span>{pad(pct)}%</span>
-      </div>
-      <h1 class="loader-logo">
-        {#each 'FROST'.split('') as ch, i}
-          <span style="opacity:{Math.min(1, Math.max(0, pct / 20 - i))}">{ch}</span>
-        {/each}
-      </h1>
-      <div class="bar"><div style="transform:scaleX({pct / 100})"></div></div>
-      <div class="loader-actions" class:show={ready}>
-        <button class="btn" on:click={() => enter(true)} on:mouseenter={() => sound.hover()}>[ Enter with sound ]</button>
-        <button class="btn ghost" on:click={() => enter(false)}>enter in silence</button>
-      </div>
-      <p class="loader-note">Headphones recommended. Scroll to move through the cold.</p>
-    </div>
+  <div class="loader" class:out={leaving} aria-label="Loading {pad(pct)}%">
+    <span class="ascii">{ascii(pct)}</span>
   </div>
 {/if}
 
@@ -171,7 +149,7 @@
 <!-- ======================= HUD ======================= -->
 <div class="hud" class:show={started}>
   <div class="brand">
-    <button class="logo" on:click={() => exp.goTo(0)} aria-label="Back to start">FROST</button>
+    <button class="logo" on:click={() => exp.home()} aria-label="Back to start">FROST</button>
     <div class="legal" class:on={inHero}>
       <p use:scramble={{ active: inHero, delay: 300, beep: false }}>// Copyright © 2026</p>
       <p use:scramble={{ active: inHero, delay: 450, beep: false }}>FROST, Inc.</p>
@@ -204,24 +182,23 @@
   {#if shownCallouts.length}
     <svg class="leaders" aria-hidden="true">
       {#each shownCallouts as c (c.key)}
-        <polyline points={leader(c).pts} />
-        <circle cx={c.x} cy={c.y} r="2.2" />
+        {#if c.side !== 'r'}<polyline points={leader(c).pts} style="opacity:{1 - c.fx}" />{/if}
       {/each}
     </svg>
   {/if}
   {#each shownCallouts as c (c.key)}
     {@const l = leader(c)}
     {@const v = VENTURES[c.crystal]}
-    <div class="callout {c.side}" style="left:{c.side === 'tl' ? l.end : l.ex}px;top:{l.ey}px">
+    <div class="callout {c.side}" class:glitch={c.fx > 0} style="left:{c.side === 'r' ? l.ex : l.end}px;top:{l.ey}px;--g:{c.fx}">
       {#if c.side === 'tl'}
         <p use:scramble={{ active: true, delay: 80 }}>{v.code}</p>
         <p use:scramble={{ active: true, delay: 200, beep: false }}>{v.name.toUpperCase()}</p>
       {:else if c.side === 'r'}
-        <p>TEMP <b>-{temps[c.crystal].t.toFixed(2)}</b></p>
-        <p>+{temps[c.crystal].d.toFixed(2)}</p>
+        <p>TEMP <b>{temps[c.crystal].t.toFixed(2)}</b></p>
+        <p>+{temps[c.crystal].d.toFixed(2).padStart(5, '0')}</p>
       {:else}
-        <p use:scramble={{ active: true, delay: 260, beep: false }}>STAGE {stage(v).toUpperCase()}</p>
-        <p use:scramble={{ active: true, delay: 340, beep: false }}>{v.tag.toUpperCase()}</p>
+        <p use:scramble={{ active: true, delay: 260, beep: false }}>D {v.date}</p>
+        <p use:scramble={{ active: true, delay: 340, beep: false }}>CLICK TO EXPLORE</p>
       {/if}
     </div>
   {/each}
@@ -248,20 +225,21 @@
 <!-- ======================= PROJECT PANEL ======================= -->
 {#if $project >= 0}
   {@const v = VENTURES[$project]}
+  <!-- the text sits over the darkened crystal, after the dissolve has run -->
+  <button class="close" on:click={closeProject} on:mouseenter={() => sound.hover()}>
+    <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
+    <span use:scramble={{ active: true, delay: 1450, beep: false }}>Close</span>
+  </button>
   <aside class="panel">
-    <button class="close" on:click={closeProject} on:mouseenter={() => sound.hover()}>[ X ] Close</button>
-    <p class="kicker" use:scramble={{ active: true, delay: 500 }}>{v.code} // {v.tag}</p>
-    <h3 use:scramble={{ active: true, delay: 700, speed: 0.7 }}>{v.name}</h3>
-    <p class="kicker dim" use:scramble={{ active: true, delay: 900, beep: false }}>////// Summary</p>
-    <p class="body" use:scramble={{ active: true, delay: 1000, speed: 5, beep: false }}>{v.summary}</p>
-    <dl>
-      {#each v.meta as [k, val]}
-        <div><dt>{k}</dt><dd>{val}</dd></div>
+    <p class="kicker dim" use:scramble={{ active: true, delay: 1450 }} use:lens>////// Summary</p>
+    <p class="body" use:scramble={{ active: true, delay: 1500, speed: 6 }} use:lens>{v.summary}</p>
+    <p class="kicker dim" use:scramble={{ active: true, delay: 1750, beep: false }} use:lens>/// Discover</p>
+    <div class="socials">
+      {#each v.socials as [label, href]}
+        <a class="ext" {href} target="_blank" rel="noopener" on:mouseenter={() => sound.hover()}>[{label}] ↗</a>
       {/each}
-    </dl>
+    </div>
+    <p class="kicker dim" use:scramble={{ active: true, delay: 1850, beep: false }} use:lens>/// Visit</p>
+    <a class="ext" href={v.site} target="_blank" rel="noopener" on:mouseenter={() => sound.hover()}>[website] ↗</a>
   </aside>
 {/if}
-
-<div class="cursor" bind:this={cursorEl} class:big={$hoverCrystal >= 0 || $domeLabels.length > 0}>
-  {#if $hoverCrystal >= 0 && $project < 0}<span>Open</span>{/if}
-</div>

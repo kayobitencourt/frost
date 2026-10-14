@@ -18,6 +18,9 @@ export const VENTURES = [
     summary:
       'Whiteout is a quiet identity layer. It lets people carry who they are between networks without leaving a trail behind them, and gives communities a way to recognise their own members without asking for anything they do not need.',
     meta: [['Founded', '2023'], ['Stage', 'Live'], ['Focus', 'Identity']],
+    date: '06.01.2023',
+    socials: [['X', 'https://x.com/'], ['IG', 'https://instagram.com/'], ['LI', 'https://linkedin.com/']],
+    site: 'https://example.com/',
   },
   {
     code: 'VENTURE_CO_02',
@@ -26,6 +29,9 @@ export const VENTURES = [
     summary:
       'Permafrost keeps things that should not disappear. Archives, records and creative work are sealed into durable storage that outlives the platforms they were first published on, so the history of a community stays with the community.',
     meta: [['Founded', '2024'], ['Stage', 'Beta'], ['Focus', 'Archival']],
+    date: '14.03.2024',
+    socials: [['X', 'https://x.com/'], ['IG', 'https://instagram.com/'], ['LI', 'https://linkedin.com/']],
+    site: 'https://example.com/',
   },
   {
     code: 'VENTURE_CO_03',
@@ -34,10 +40,13 @@ export const VENTURES = [
     summary:
       'Rime is a studio toolkit for people who build worlds. It turns small, scattered contributions into shared canon, and makes sure every contributor is credited and rewarded for the layer they added.',
     meta: [['Founded', '2025'], ['Stage', 'Private'], ['Focus', 'Creation']],
+    date: '22.09.2025',
+    socials: [['X', 'https://x.com/'], ['IG', 'https://instagram.com/'], ['LI', 'https://linkedin.com/']],
+    site: 'https://example.com/',
   },
 ];
 
-// Replace the hrefs with FROST's real profiles.
+// Replace the venture dates/socials/site and these hrefs with FROST's real profiles.
 export const LINKS = [
   { label: 'Medium', glyph: 'M', href: 'https://medium.com/' },
   { label: 'LinkedIn', glyph: 'in', href: 'https://www.linkedin.com/' },

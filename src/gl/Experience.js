@@ -14,13 +14,18 @@ import { CUTS } from '../content.js';
 import { progress, sceneIndex, linkIndex } from '../state.js';
 import { sound } from '../audio/Sound.js';
 import { smooth, damp } from './util.js';
+import { noise } from './glsl.js';
 
 // Half-width of the scroll window in which two scenes are blended, per cut.
-const BLENDS = [0.05, 0.03, 0.035];
-// 0 = chromatic glitch, 1 = through the light, 2 = through the cloud deck
-const KINDS = [2, 0, 1];
+const BLENDS = [0.07, 0.05, 0.05];
+// 0 = fog bank rolling in from the corner, 1 = camera tilts down past a cloud band,
+// 2 = iris: the next scene opens out of the centre of the last portal
+const KINDS = [0, 1, 2];
+// The journey loops: the last stretch of progress hands the platform back to the igloo
+// (3 = the floor ripples, a snow dune rises and the igloo is rebuilt behind it).
+const WRAP = 0.06;
 
-// Blends two rendered scenes: banded RGB-split glitch, a pass through light or through cloud.
+// Blends two rendered scenes so a cut reads as one continuous camera move.
 const MixShader = {
   uniforms: {
     tA: { value: null },
@@ -28,62 +33,79 @@ const MixShader = {
     uMix: { value: 0 },
     uKind: { value: 0 },
     uTime: { value: 0 },
+    uAspect: { value: 1 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
     void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: /* glsl */ `
     uniform sampler2D tA, tB;
-    uniform float uMix, uKind, uTime;
+    uniform float uMix, uKind, uTime, uAspect;
     varying vec2 vUv;
-    float h1(float x) { return fract(sin(x * 91.713) * 43758.5453); }
-    float h2(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
-    vec3 split(sampler2D t, vec2 uv, float ab) {
-      return vec3(texture2D(t, uv + vec2(ab, 0.0)).r, texture2D(t, uv).g, texture2D(t, uv - vec2(ab, 0.0)).b);
+    ${noise}
+    const vec3 MIST = vec3(0.8, 0.83, 0.87);
+    vec3 split(sampler2D t, vec2 uv, vec2 ab) {
+      return vec3(texture2D(t, uv + ab).r, texture2D(t, uv).g, texture2D(t, uv - ab).b);
     }
     void main() {
       float m = uMix;
       if (m <= 0.0) { gl_FragColor = texture2D(tA, vUv); return; }
       if (m >= 1.0) { gl_FragColor = texture2D(tB, vUv); return; }
-      float k = sin(m * 3.14159);
+      vec2 p = vec2(vUv.x * uAspect, vUv.y);
+      vec3 col;
       if (uKind < 0.5) {
-        float tick = floor(uTime * 14.0);
-        // horizontal bands torn sideways
-        float rows = mix(10.0, 48.0, h1(tick));
-        float band = floor(vUv.y * rows);
-        float r = h1(band * 1.37 + tick * 7.1);
-        float shift = (r - 0.5) * 0.22 * k * step(0.62 - k * 0.45, r);
-        vec2 uv = vec2(vUv.x + shift, vUv.y);
-        // smear: stretch some bands into streaks
-        uv.x = mix(uv.x, floor(uv.x * 24.0) / 24.0, step(0.9, r) * k);
-        float ab = 0.004 + 0.02 * k + abs(shift) * 0.25;
-        vec3 a = split(tA, uv, ab);
-        vec3 b = split(tB, uv, ab);
-        // wide strips swap from A to B in a ragged order
-        float blk = h2(vec2(floor(vUv.x * 3.0), floor(vUv.y * 34.0)) + floor(uTime * 8.0) * 0.1);
-        float sel = smoothstep(blk - 0.15, blk + 0.15, m * 1.3 - 0.15);
-        vec3 col = mix(a, b, sel);
-        col = mix(col, vec3(0.86, 0.88, 0.92), k * 0.2);
-        col += (h2(vUv * 800.0 + uTime) - 0.5) * 0.06 * k;
-        gl_FragColor = vec4(col, 1.0);
-      } else if (uKind > 1.5) {
-        // through the cloud: fringed, washed into fog, the next scene emerges below it
-        float ab = 0.018 * k;
+        // a soft bank of fog pressed against the lens rolls in from the bottom-left
+        // corner and swallows the frame; the next scene surfaces as it thins out
+        float billow = fbm(vec3(p * 2.2 + vec2(uTime * 0.05, uTime * 0.02), uTime * 0.04));
+        float d = dot(vUv, vec2(0.62, 0.78)) + (billow - 0.5) * 0.45;
+        float front = m * 3.0 - 0.05;
+        float cover = smoothstep(front + 0.05, front - 0.35, d);
+        float edge = cover * (1.0 - cover) * 4.0;
+        vec2 ab = vec2(0.006, 0.004) * edge;
         vec3 a = split(tA, vUv, ab);
-        vec3 b = split(tB, vUv, ab);
-        vec3 col = mix(a, b, smoothstep(0.35, 0.65, m));
-        gl_FragColor = vec4(mix(col, vec3(0.8, 0.83, 0.87), k * 0.8), 1.0);
-      } else {
-        // through the light: zoom-blur A into the glow, then B surfaces from it
+        vec3 b = texture2D(tB, vUv).rgb;
+        float lift = fbm(vec3(p * 1.4 - vec2(0.0, uTime * 0.03), 7.0 + uTime * 0.03));
+        float thin = smoothstep(0.7, 1.0, m) * 1.5 - 0.25;
+        float fogA = cover * smoothstep(thin - 0.25, thin + 0.05, lift);
+        vec3 haze = MIST * (0.94 + 0.1 * billow - 0.06 * lift);
+        col = mix(mix(a, b, step(0.68, m)), haze, fogA);
+      } else if (uKind < 1.5) {
+        // the camera tilts down: A leaves through the top, B rises from below a cloud band
+        float e = m * m * (3.0 - 2.0 * m);
+        float wob = (fbm(vec3(p * vec2(2.0, 4.0) + vec2(uTime * 0.04, 0.0), uTime * 0.05)) - 0.5) * 0.18;
+        vec3 a = texture2D(tA, vec2(vUv.x, clamp(vUv.y - e, 0.0, 1.0))).rgb;
+        vec3 b = texture2D(tB, vec2(vUv.x, clamp(vUv.y + 1.0 - e, 0.0, 1.0))).rgb;
+        float y = vUv.y + wob;
+        col = mix(b, a, smoothstep(e - 0.1, e + 0.1, y));
+        float band = exp(-pow((y - e) / 0.16, 2.0)) * smoothstep(0.35, 0.75, fbm(vec3(p * 3.0, uTime * 0.06)) + 0.25);
+        col = mix(col, MIST * 0.96, clamp(band, 0.0, 1.0) * 0.9 * sin(m * 3.14159));
+      } else if (uKind < 2.5) {
+        // iris: the last ring grows past the frame while B opens out of its centre
+        float e = m * m * (3.0 - 2.0 * m);
         vec2 d = vUv - 0.5;
-        vec3 a = vec3(0.0);
-        for (int i = 0; i < 8; i++) a += texture2D(tA, 0.5 + d * (1.0 - float(i) * 0.03 * k)).rgb;
-        a /= 8.0;
-        vec3 b = texture2D(tB, 0.5 + d * (1.0 + (1.0 - m) * 0.25)).rgb;
-        vec3 w = mix(a, vec3(1.05, 1.07, 1.1), 0.75);
-        vec3 col = m < 0.5 ? mix(a, w, smoothstep(0.0, 0.5, m)) : mix(w, b, smoothstep(0.5, 1.0, m));
-        gl_FragColor = vec4(col, 1.0);
+        vec3 a = texture2D(tA, 0.5 + d / (1.0 + e * 2.5)).rgb;
+        vec3 b = texture2D(tB, 0.5 + d * mix(1.4, 1.0, e)).rgb;
+        float r = length(d * vec2(uAspect, 1.0)) + (fbm(vec3(d * 6.0, uTime * 0.2)) - 0.5) * 0.06;
+        float rad = e * 1.2;
+        col = mix(a, b, smoothstep(rad, rad - 0.15, r));
+        col += vec3(0.9, 0.95, 1.0) * exp(-pow((r - rad + 0.04) / 0.035, 2.0)) * 0.45 * sin(m * 3.14159);
+      } else {
+        // the loop closes: the platform floor ripples with a prismatic fringe, then a snow
+        // dune rises from below and the valley is revealed behind its crest
+        float e = m * m * (3.0 - 2.0 * m);
+        float k = sin(m * 3.14159);
+        float low = smoothstep(0.65, 0.0, vUv.y);
+        vec2 ua = vUv;
+        ua.y += sin(vUv.y * 70.0 - uTime * 9.0) * 0.004 * k * low;
+        ua.x += sin(vUv.y * 40.0 + uTime * 6.0) * 0.003 * k * low;
+        vec3 a = split(tA, ua, vec2(0.008 * k * low, 0.0));
+        vec3 b = texture2D(tB, vUv).rgb;
+        float wob = (fbm(vec3(p * vec2(3.0, 1.5) + vec2(uTime * 0.1, 0.0), uTime * 0.1)) - 0.5) * 0.2;
+        float edge = e * 1.35 - 0.15 + wob;
+        col = mix(a, b, smoothstep(edge + 0.04, edge - 0.04, vUv.y));
+        col = mix(col, MIST, exp(-pow((vUv.y - edge) / 0.06, 2.0)) * 0.75 * k);
       }
+      gl_FragColor = vec4(col, 1.0);
     }`,
 };
 
@@ -94,6 +116,8 @@ const FinalShader = {
     uAberr: { value: 0 },
     uZoom: { value: 0 },
     uWarp: { value: 0 },
+    uDark: { value: 0 },
+    uSwirl: { value: 0 },
     uRes: { value: new THREE.Vector2(1, 1) },
   },
   vertexShader: /* glsl */ `
@@ -101,35 +125,65 @@ const FinalShader = {
     void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
-    uniform float uTime, uAberr, uZoom, uWarp;
+    uniform float uTime, uAberr, uZoom, uWarp, uDark, uSwirl;
     uniform vec2 uRes;
     varying vec2 vUv;
+    ${noise}
     float h(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
     void main() {
       vec2 d = vUv - 0.5;
-      // passing through a portal membrane: the image ripples like water
-      float rr = length(d);
-      d *= 1.0 + sin(rr * 34.0 - uTime * 5.0) * 0.018 * uWarp;
-      d = mat2(cos(uWarp * 0.12 * (0.6 - rr)), -sin(uWarp * 0.12 * (0.6 - rr)), sin(uWarp * 0.12 * (0.6 - rr)), cos(uWarp * 0.12 * (0.6 - rr))) * d;
+      // passing through a ring: a soft lens bulge at the edges of the frame
+      d *= 1.0 + dot(d, d) * uWarp * 0.35;
+      // inside a portal membrane the view wobbles like water and smears round in streaks
+      float sw = abs(uSwirl);
+      float rA = length(d * vec2(uRes.x / uRes.y, 1.0));
+      float streak = 0.0;
+      if (sw > 0.001) {
+        d += (vec2(noise(vec3(d * 7.0, uTime * 0.7)), noise(vec3(d * 7.0 + 5.0, uTime * 0.7))) - 0.5) * 0.04 * sw * smoothstep(0.7, 0.1, rA);
+        streak = noise(vec3(rA * 26.0, atan(d.y, d.x) * 1.5, uTime * 0.6));
+      }
+      float spread = uSwirl * (0.25 + 0.75 * streak) * 0.6;
       float r2 = dot(d, d);
-      float ab = 0.0018 + uAberr + uZoom * 0.006 + uWarp * 0.01;
+      // project view: the frame dissolves through a frosted noise front into the dark
+      vec2 q = vUv * vec2(uRes.x / uRes.y, 1.0);
+      float n = fbm(vec3(q * 3.5, 1.0)) * 0.8 + noise(vec3(q * 30.0, 2.0)) * 0.2;
+      // the dark closes in from the edges; the centre goes last
+      n = n * 0.7 + (0.6 - length(vUv - 0.5)) * 0.6;
+      float th = uDark * 1.3 - 0.15;
+      float dark = smoothstep(th + 0.02, th - 0.02, n);
+      float fringe = smoothstep(0.05, 0.0, abs(n - th)) * step(0.001, uDark) * step(uDark, 0.999);
+      float ab = 0.0015 + uAberr + uZoom * 0.006 + uWarp * 0.004 + fringe * 0.004;
       vec3 col = vec3(0.0);
       // radial zoom blur for dives, with a little lens fringe at the edges
       float jitter = h(vUv * uRes + uTime);
       const int N = 10;
       for (int i = 0; i < N; i++) {
-        float s = 1.0 - (float(i) + jitter) / float(N) * uZoom * 0.12;
-        vec2 uv = 0.5 + d * s;
-        col.r += texture2D(tDiffuse, uv - d * ab * (1.0 + r2 * 4.0)).r;
+        float k = (float(i) + jitter) / float(N);
+        float s = 1.0 - k * uZoom * 0.12;
+        float a = (k - 0.5) * spread;
+        vec2 dd = mat2(cos(a), sin(a), -sin(a), cos(a)) * d;
+        vec2 uv = 0.5 + dd * s;
+        col.r += texture2D(tDiffuse, uv - dd * ab * (1.0 + r2 * 4.0)).r;
         col.g += texture2D(tDiffuse, uv).g;
-        col.b += texture2D(tDiffuse, uv + d * ab * (1.0 + r2 * 4.0)).b;
+        col.b += texture2D(tDiffuse, uv + dd * ab * (1.0 + r2 * 4.0)).b;
       }
       col /= float(N);
+      // the tunnel walls glow white towards the edges of the frame
+      float wall = smoothstep(0.3, 0.62, rA + (streak - 0.5) * 0.14);
+      col = mix(col, vec3(0.9, 0.94, 1.0), wall * sw * 0.85);
       col = clamp(col, 0.0, 1.0);
       float luma = dot(col, vec3(0.299, 0.587, 0.114));
       col = mix(col, col * col * (3.0 - 2.0 * col), 0.22);
       col += vec3(-0.012, 0.0, 0.018) * (1.0 - luma) + vec3(0.008, 0.004, -0.006) * luma;
-      col *= 1.0 - smoothstep(0.25, 0.9, r2 * 1.6) * 0.2;
+      // night grade (linear): deep navy around #1c2430, the scene reduced to a low-contrast silhouette
+      vec3 night = vec3(0.011, 0.016, 0.028) + pow(luma, 2.0) * vec3(0.05, 0.06, 0.08);
+      night += vec3(0.02, 0.025, 0.035) * smoothstep(0.7, 0.0, length(vUv - vec2(0.9, 1.0)));
+      col = mix(col, night, dark);
+      // the dissolve front carries a prismatic edge: warm just inside, cold just outside
+      float live = step(0.001, uDark) * step(uDark, 0.999);
+      col += vec3(0.035, 0.012, 0.008) * smoothstep(0.03, 0.0, abs(n - th + 0.02)) * live;
+      col += vec3(0.01, 0.03, 0.08) * smoothstep(0.03, 0.0, abs(n - th - 0.02)) * live;
+      col *= 1.0 - smoothstep(0.25, 0.9, r2 * 1.6) * (0.2 + dark * 0.25);
       col += (h(vUv * uRes + fract(uTime) * 100.0) - 0.5) * 0.022;
       gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
     }`,
@@ -185,7 +239,8 @@ export class Experience {
   resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const dpr = Math.min(Math.max(window.devicePixelRatio, 1.25), 2);
+    // capped at 1.5: the post chain (depth of field, bloom, mix) runs at full resolution
+    const dpr = Math.min(window.devicePixelRatio, 1.5);
     this.renderer.setPixelRatio(dpr);
     this.renderer.setSize(w, h);
     this.composer.setPixelRatio(dpr);
@@ -193,6 +248,7 @@ export class Experience {
     this.rtA.setSize(Math.round(w * dpr), Math.round(h * dpr));
     this.rtB.setSize(Math.round(w * dpr), Math.round(h * dpr));
     this.final.uniforms.uRes.value.set(w * dpr, h * dpr);
+    this.mix.uniforms.uAspect.value = w / h;
     for (const s of this.scenes) s.resize(w, h, dpr);
   }
 
@@ -202,24 +258,38 @@ export class Experience {
     tl.add(() => { this.scroll.enabled = true; }, 4.6);
   }
 
-  goTo(p) {
-    this.scroll.target = p;
+  // Back to the start: the nearest loop boundary, so from the far end it rolls forward.
+  home() {
+    this.scroll.target = Math.round(this.scroll.target);
   }
 
+  // Open: the camera pushes onto the crystal, the leaders glitch away, the ice frosts and
+  // slides out of focus, then the frame dissolves into the night view. Close plays it back.
   setFocus(i) {
     const c = this.scenes[1];
-    if (i >= 0) c.focus.index = i;
-    this.scroll.enabled = i < 0;
-    gsap.to(c.focus, {
-      v: i >= 0 ? 1 : 0,
-      duration: 1.4,
-      ease: 'power3.inOut',
-      onComplete: () => { if (i < 0) c.focus.index = -1; },
-    });
+    const open = i >= 0;
+    if (open) c.focus.index = i;
+    this.scroll.enabled = !open;
+    gsap.killTweensOf([c.focus, c.post, c.hud]);
+    if (open) {
+      gsap.to(c.focus, { v: 1, duration: 1.5, ease: 'power2.inOut' });
+      gsap.to(c.hud, { v: 0, duration: 0.3, delay: 0.55, ease: 'none' });
+      gsap.to(c.focus, { frost: 1, duration: 0.6, delay: 0.3, ease: 'power2.in' });
+      gsap.to(c.focus, { blur: 1, duration: 0.5, delay: 0.75, ease: 'power1.in' });
+      gsap.to(c.post, { dark: 1, duration: 0.45, delay: 1.15, ease: 'power1.inOut' });
+    } else {
+      gsap.to(c.post, { dark: 0, duration: 0.45, ease: 'power1.inOut' });
+      gsap.to(c.focus, { blur: 0, duration: 0.6, delay: 0.25, ease: 'power1.out' });
+      gsap.to(c.focus, { frost: 0, duration: 0.6, delay: 0.2, ease: 'power2.out' });
+      gsap.to(c.focus, { v: 0, duration: 1.3, ease: 'power2.inOut', onComplete: () => { c.focus.index = -1; } });
+      gsap.to(c.hud, { v: 1, duration: 0.35, delay: 0.85, ease: 'none' });
+    }
   }
 
   // Scene-local progress: 0 when the scene's slice starts, 1 when it ends (may overshoot in blends).
   local(i, p) {
+    // seen across the loop, the igloo sits just before its own slice
+    if (i === 0 && p > 0.5) p -= 1;
     const a = i === 0 ? 0 : CUTS[i - 1];
     const b = i === CUTS.length ? 1 : CUTS[i];
     return (p - a) / (b - a);
@@ -233,7 +303,7 @@ export class Experience {
     const dt = Math.min(this.clock.getDelta(), 0.05);
     const t = this.clock.elapsedTime;
     this.scroll.update(dt);
-    const p = this.scroll.current;
+    const p = this.scroll.current - Math.floor(this.scroll.current);
     const vel = Math.abs(this.scroll.velocity);
     if (Math.abs(p - this.lastProgress) > 1e-4) {
       this.lastProgress = p;
@@ -245,13 +315,19 @@ export class Experience {
     let a = CUTS.filter((c, i) => p >= c + BLENDS[i]).length;
     let b = -1;
     let m = 0;
+    let kind = KINDS[a];
     const cut = CUTS[a];
-    if (cut !== undefined && p > cut - BLENDS[a]) {
+    if (p >= 1 - WRAP) {
+      b = 0;
+      m = smooth(1 - WRAP, 1, p);
+      kind = 3;
+    } else if (cut !== undefined && p > cut - BLENDS[a]) {
       b = a + 1;
       m = smooth(cut - BLENDS[a], cut + BLENDS[a], p);
     }
     const shown = m < 0.5 ? a : b;
     if (shown !== this.active) {
+      if (shown + this.active === 3 && shown * this.active === 0) sound.rebuild();
       this.active = shown;
       sceneIndex.set(shown);
       sound.whoosh();
@@ -270,15 +346,17 @@ export class Experience {
     if (b >= 0 && m > 0) mu.tB.value = this.render(this.scenes[b], this.rtB);
     this.renderer.setRenderTarget(null);
     mu.uMix.value = b >= 0 ? m : 0;
-    mu.uKind.value = b >= 0 ? KINDS[a] : 0;
+    mu.uKind.value = b >= 0 ? kind : 0;
     mu.uTime.value = t;
 
     const blend = (key) => (b >= 0 ? (this.scenes[a].post[key] || 0) * (1 - m) + (this.scenes[b].post[key] || 0) * m : this.scenes[a].post[key] || 0);
     const fu = this.final.uniforms;
     fu.uZoom.value = blend('zoom');
     fu.uWarp.value = blend('warp');
+    fu.uDark.value = blend('dark');
+    fu.uSwirl.value = blend('swirl');
     fu.uTime.value = t;
-    fu.uAberr.value += (Math.min(vel * 0.012, 0.006) + blend('aberr') - fu.uAberr.value) * dt * 6;
+    fu.uAberr.value += (Math.min(vel * 0.004, 0.002) + blend('aberr') - fu.uAberr.value) * dt * 6;
 
     this.composer.render(dt);
   }

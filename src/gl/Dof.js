@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 
-// Cinematic depth of field: a 64-tap Vogel-disk gather where every sample only counts
+// Cinematic depth of field: a 40-tap Vogel-disk gather where every sample only counts
 // if its own circle of confusion reaches the pixel, so sharp foreground never smears
 // and out-of-focus highlights bloom into soft discs. Empty sky (cleared depth) stays sharp.
 const material = new THREE.ShaderMaterial({
@@ -41,7 +41,7 @@ const material = new THREE.ShaderMaterial({
       vec3 acc = base.rgb;
       float wsum = 1.0;
       float spin = fract(sin(dot(vUv, vec2(12.9898, 78.233))) * 43758.5453) * 6.2831;
-      const int N = 64;
+      const int N = 40;
       for (int i = 0; i < N; i++) {
         float r = sqrt((float(i) + 0.5) / float(N));
         float a = float(i) * 2.39996 + spin;

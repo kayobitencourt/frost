@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 import {
   createDome, createWireIgloo, createPlexus, createSnow, createGround, createDrift,
-  createMountains, createSky, createClouds, createMist, createLensFlakes, DOME_RADIUS, DOOR,
+  createMountains, createSky, createMist, createLensFlakes, DOME_RADIUS, DOOR,
 } from '../World.js';
 import { domeLabels } from '../../state.js';
 import { sound } from '../../audio/Sound.js';
 import { smooth, damp } from '../util.js';
 
-const LIFT_LABELS = 4;
+const LIFT_LABELS = 8;
 const UP = new THREE.Vector3(0, 0.6, 0);
 // Three-quarter view from a low ridge: igloo a little left of centre, door to the right.
 const BASE_POS = new THREE.Vector3(-4.6, 8.2, 25.5);
@@ -29,14 +29,13 @@ export class IglooScene {
     this.drift = createDrift(22000);
     this.mountains = createMountains();
     this.sky = createSky();
-    this.clouds = createClouds();
     this.mist = createMist();
     this.flakes = createLensFlakes();
     this.camera.add(this.flakes.points);
     this.measure = this.createMeasureLines();
     this.scene.add(
       this.sky, this.mountains, this.ground.mesh, this.dome.mesh, this.wire.lines, this.plexus.group,
-      this.snow.points, this.drift.points, this.mist.group, this.clouds.group, this.measure, this.camera
+      this.snow.points, this.drift.points, this.mist.group, this.measure, this.camera
     );
 
     // before the intro runs nothing but the grey void is on screen
@@ -133,7 +132,8 @@ export class IglooScene {
     for (let i = 0; i < blocks.length; i++) {
       const bl = blocks[i];
       const d = bl.center.distanceTo(this.domeHit);
-      const target = this.domeHover * smooth(2.6, 0.4, d) * (0.5 + bl.rand * 0.9);
+      // a wide patch of the shell answers the cursor, the nearest bricks flung furthest
+      const target = this.domeHover * smooth(3.8, 0.4, d) * (0.55 + bl.rand * 1.0);
       vel[i] += ((target - value[i]) * 90 - vel[i] * 11) * dt;
       value[i] += vel[i] * dt;
       if (Math.abs(value[i]) > 1e-4 || Math.abs(vel[i]) > 1e-4) moving = true;
@@ -191,7 +191,7 @@ export class IglooScene {
   }
 
   update({ t, dt, s, mouse, mouseLerp, vel, interactive }) {
-    // scroll: a cloud deck rises out of the valley and swallows the igloo
+    // scroll: the camera backs away and sinks while a fog bank rolls in over the lens (see the mix pass)
     const rise = smooth(0, 1, s);
 
     const cam = this.camera;
@@ -208,9 +208,9 @@ export class IglooScene {
     // faint handheld breathing
     pos.x += (Math.sin(t * 1.31) * 0.6 + Math.sin(t * 2.17) * 0.4) * 0.02 * idle;
     pos.y += (Math.sin(t * 1.73) * 0.6 + Math.sin(t * 2.91) * 0.4) * 0.015 * idle;
-    pos.z -= rise * 6;
-    pos.y -= rise * 1.5;
-    look.y -= rise * 1.2;
+    pos.z += rise * 6;
+    pos.y -= rise * 2;
+    look.y -= rise * 1.8;
     cam.lookAt(look);
     cam.translateX(mouseLerp.x * 0.6 * idle);
     cam.translateY(mouseLerp.y * 0.3 * idle);
@@ -223,16 +223,15 @@ export class IglooScene {
 
     const dm = this.dome.material.uniforms;
     dm.uTime.value = t;
-    dm.uGlow.value = Math.max(this.intro.pulse, 0.12 + this.domeHover * 0.55);
+    // arriving across the loop from the platform, the igloo is rebuilt brick by brick
+    dm.uAssemble.value = s < 0 ? smooth(-0.3, -0.02, s) : 1;
+    dm.uGlow.value = Math.max(this.intro.pulse, 0.12 + this.domeHover * 0.8);
     this.ground.material.uniforms.uCoreIntensity.value = dm.uGlow.value * 0.6;
     this.ground.material.uniforms.uTime.value = t;
-    this.clouds.material.uniforms.uTime.value = t;
-    this.clouds.material.uniforms.uDensity.value = smooth(0.0, 0.35, s);
-    this.clouds.group.position.y = -14 + rise * 17;
-    this.clouds.group.visible = s > 0.001;
-    this.post.aberr = smooth(0.12, 0.8, s) * 0.012;
+    this.post.aberr = smooth(0.12, 0.8, s) * 0.003;
     this.post.dof.focus = cam.position.distanceTo(this._a.set(0, 2, 0));
-    this.post.dof.aperture = 0.45 * idle;
+    // the foreground drifts out of focus as the camera backs away
+    this.post.dof.aperture = 0.45 * idle + rise * 0.5;
     this.mist.material.uniforms.uTime.value = t;
     this.mist.material.uniforms.uShow.value = this.reveal.env * (1 - rise);
     this.flakes.material.uniforms.uTime.value = t;

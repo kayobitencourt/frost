@@ -14,7 +14,7 @@ import { smooth, easeInOut } from '../util.js';
 
 const SHAPE_HEIGHT = 5;
 const SHAPE_Y = 3.75;
-const TRAIL = 10;
+const TRAIL = 6;
 // Arrival: straight down onto the pedestal, then a slow pitch forward to face the figure.
 const CAM_FROM = { pos: new THREE.Vector3(0, 21, 0.8), look: new THREE.Vector3(0, 0, 0) };
 const CAM_TO = { pos: new THREE.Vector3(0, 3.4, 13.5), look: new THREE.Vector3(0, 3.3, 0) };
@@ -62,7 +62,8 @@ export class PlatformScene {
     this.backdrop.material.uniforms.uBottom.value.setRGB(0.5, 0.53, 0.58);
     this.scene.add(this.backdrop.mesh);
 
-    this.count = window.innerWidth < 720 ? 24000 : 52000;
+    // fewer, slightly larger grains: the figure reads the same and the hover stays smooth
+    this.count = window.innerWidth < 720 ? 10000 : 22000;
     const font = new FontLoader().parse(fontData);
     this.shapes = LINKS.map((l) => sampleGlyph(font, l.glyph, this.count));
     this.current = get(linkIndex);
@@ -175,50 +176,66 @@ export class PlatformScene {
     geo.setAttribute('aCloud', new THREE.BufferAttribute(coreCloud(n), 3));
     geo.setAttribute('aRand', new THREE.BufferAttribute(this.rand, 1));
     this.trail = Array.from({ length: TRAIL }, () => new THREE.Vector4(0, -99, 0, 0));
+    this.trailVel = Array.from({ length: TRAIL }, () => new THREE.Vector3());
     this.particleMat = new THREE.ShaderMaterial({
       uniforms: {
         uTime: { value: 0 }, uMorph: { value: 1 }, uForm: { value: 0 }, uPixel: { value: 1 }, uSpin: { value: 0 },
-        uTrail: { value: this.trail },
+        uTrail: { value: this.trail }, uTrailVel: { value: this.trailVel }, uTrailOn: { value: 0 },
       },
       vertexShader: /* glsl */ `
         attribute vec3 aFrom, aTo, aCloud;
         attribute float aRand;
-        uniform float uTime, uMorph, uForm, uPixel, uSpin;
+        uniform float uTime, uMorph, uForm, uPixel, uSpin, uTrailOn;
         uniform vec4 uTrail[${TRAIL}];
+        uniform vec3 uTrailVel[${TRAIL}];
         varying float vGlow;
         ${noise}
         vec3 rotY(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z); }
         vec3 flow(vec3 q) { return vec3(noise(q), noise(q + 17.1), noise(q + 31.7)) - 0.5; }
         void main() {
+          // the noise is only evaluated while it moves something: at rest a grain is just
+          // its shape position, which keeps the idle and hover cost low
+
           // link change: each grain leaves on its own beat and is carried by the flow
           float t = clamp(uMorph * 1.7 - aRand * 0.7, 0.0, 1.0);
           float te = t * t * (3.0 - 2.0 * t);
           vec3 shape = mix(aFrom, aTo, te);
           float mid = sin(3.14159 * t);
-          shape += flow(shape * 0.42 + vec3(0.0, uTime * 0.35, 0.0)) * mid * 5.0 + vec3(0.0, mid * (0.6 + aRand), 0.0);
+          if (mid > 0.001) shape += flow(shape * 0.42 + vec3(0.0, uTime * 0.35, 0.0)) * mid * 5.0 + vec3(0.0, mid * (0.6 + aRand), 0.0);
 
           // arrival: the cloud on the pedestal swirls up into the figure
           float f = clamp(uForm * 1.6 - aRand * 0.6, 0.0, 1.0);
           float fe = f * f * (3.0 - 2.0 * f);
-          vec3 cloud = aCloud + flow(aCloud * 1.3 + uTime * 0.4) * 0.5;
-          vec3 p = mix(cloud, shape, fe);
-          p += flow(p * 0.5 + 3.0) * sin(3.14159 * f) * 3.0;
+          vec3 p = shape;
+          if (f < 1.0) {
+            vec3 cloud = aCloud + flow(aCloud * 1.3 + uTime * 0.4) * 0.5;
+            p = mix(cloud, shape, fe);
+            p += flow(p * 0.5 + 3.0) * sin(3.14159 * f) * 3.0;
+          }
           p = rotY(p, uSpin * fe);
 
-          // hover: grains simply step out of the cursor's way and settle back
-          vec3 push = vec3(0.0);
-          for (int i = 0; i < ${TRAIL}; i++) {
-            vec3 d = p - uTrail[i].xyz;
-            d.z *= 0.4;
-            float w = exp(-dot(d, d) * 1.6) * uTrail[i].w;
-            push += normalize(vec3(d.xy, d.z * 0.5) + 1e-4) * w;
+          // hover: grains caught by the cursor light up and are swept along its path
+          // in a flowing ribbon, then drift back into the figure as the trail fades
+          float caught = 0.0;
+          if (uTrailOn > 0.001) {
+            vec3 drag = vec3(0.0);
+            for (int i = 0; i < ${TRAIL}; i++) {
+              vec3 d = p - uTrail[i].xyz;
+              d.z *= 0.4;
+              float w = exp(-dot(d, d) * 1.2) * uTrail[i].w;
+              drag += uTrailVel[i] * w + normalize(d + 1e-4) * w * 0.25;
+              caught += w;
+            }
+            caught = min(caught, 1.0);
+            if (caught > 0.002) {
+              p += drag / max(length(drag), 1.0) * (0.8 + aRand * 1.2);
+              p += flow(p * 0.9 + vec3(0.0, uTime * 0.6, 0.0)) * caught * (0.8 + aRand);
+            }
           }
-          float pl = length(push);
-          p += push / max(pl, 1.0) * (0.7 + aRand * 0.4);
 
-          vGlow = clamp(mid * 1.4 + (1.0 - fe) * 1.2, 0.0, 1.0);
+          vGlow = clamp(max(mid * 1.4 + (1.0 - fe) * 1.2, caught * (0.6 + aRand * 0.5)), 0.0, 1.0);
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
-          gl_PointSize = (0.032 + aRand * 0.018) * uPixel / -mv.z;
+          gl_PointSize = (0.046 + aRand * 0.026) * uPixel / -mv.z;
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: /* glsl */ `
@@ -296,21 +313,29 @@ export class PlatformScene {
     this.ripples.forEach((r, i) => r.scale.setScalar(1 + ripple * (0.5 + i * 0.12) * (1 - settled) + settled * beat * (0.4 + i * 0.1)));
     this.rippleMat.opacity = 0.75 * (1 - smooth(0.25, 0.5, s)) + settled * 0.3 * Math.pow(1 - beat, 2) * smooth(0, 0.08, beat);
 
-    // cursor trail: a new stamp whenever the pointer has moved, all stamps fade out
-    const decay = Math.exp(-dt * 2.4);
+    // cursor trail: a new stamp whenever the pointer has moved, carrying the direction it
+    // moved in; all stamps fade out slowly so the swept grains leave a long ribbon
+    const decay = Math.exp(-dt * 1.2);
     for (const p of this.trail) p.w *= decay;
     if (interactive && form > 0.95) {
       this.raycaster.setFromCamera(mouse, cam);
-      if (this.raycaster.ray.intersectPlane(this.plane, this.mouseWorld) && this.mouseWorld.distanceTo(this.lastTrail) > 0.15) {
-        this.lastTrail.copy(this.mouseWorld);
-        const slot = this.trail.reduce((a, b) => (b.w < a.w ? b : a));
-        slot.set(this.mouseWorld.x, this.mouseWorld.y, this.mouseWorld.z, 1);
+      if (this.raycaster.ray.intersectPlane(this.plane, this.mouseWorld)) {
+        const moved = this.mouseWorld.distanceTo(this.lastTrail);
+        if (moved > 0.2) {
+          let k = 0;
+          for (let i = 1; i < TRAIL; i++) if (this.trail[i].w < this.trail[k].w) k = i;
+          const v = this.trailVel[k].subVectors(this.mouseWorld, this.lastTrail);
+          v.multiplyScalar(moved > 3 ? 0 : Math.min(moved * 6, 2.5) / moved);
+          this.trail[k].set(this.mouseWorld.x, this.mouseWorld.y, this.mouseWorld.z, 1);
+          this.lastTrail.copy(this.mouseWorld);
+        }
       }
     }
 
     const u = this.particleMat.uniforms;
     u.uTime.value = t;
     u.uMorph.value = this.morph.v;
+    u.uTrailOn.value = this.trail.reduce((a, p) => a + p.w, 0);
     u.uForm.value = form;
     u.uSpin.value = Math.sin(t * 0.3) * 0.75;
     this.holoMat.uniforms.uTime.value = t;

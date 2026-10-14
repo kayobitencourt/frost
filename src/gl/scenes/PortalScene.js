@@ -3,10 +3,24 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { createBackdrop, createStoneMaterial } from '../Backdrop.js';
 import { noise, voronoi } from '../glsl.js';
 import { sound } from '../../audio/Sound.js';
-import { smooth } from '../util.js';
+import { smooth, clamp01 } from '../util.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
-const GAP = 26;
+const GAP = 22;
+const Z_START = 17;
+// stop short of the bright core so it reads as a glowing cloud, not a white screen
+const Z_END = -GAP * 2 + 4.5;
+const STEPS = 256;
+// Camera depth along the passage is one unbroken dive: the speed builds while the first
+// portal assembles and eases out on arrival, but never drops to zero between rings.
+const PATH = (() => {
+  const lut = new Float32Array(STEPS + 1);
+  for (let i = 1; i <= STEPS; i++) {
+    const u = (i - 0.5) / STEPS;
+    lut[i] = lut[i - 1] + (0.25 + 0.75 * smooth(0, 0.3, u)) * (1 - 0.85 * smooth(0.85, 1, u));
+  }
+  return lut.map((v) => v / lut[STEPS]);
+})();
 
 // Annulus sector with bevelled edges, pivoted on its own centre.
 function arcPiece(rIn, rOut, a0, a1, depth) {
@@ -66,7 +80,8 @@ export class PortalScene {
 
     this.spin = 0;
     this.lit = [false, false, false];
-    this.post = { zoom: 0, aberr: 0, warp: 0, dof: { focus: 16, aperture: 0.55 } };
+    this.ahead = [true, true, true];
+    this.post = { zoom: 0, aberr: 0, warp: 0, swirl: 0, swirlDir: 1, dof: { focus: 16, aperture: 0.55 } };
     this._q = new THREE.Quaternion();
   }
 
@@ -178,12 +193,12 @@ export class PortalScene {
   // Glowing membrane inside the ring: hot rim with flares, a living web of cracks.
   createDisc() {
     const material = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uGlow: { value: 0 } },
+      uniforms: { uTime: { value: 0 }, uGlow: { value: 0 }, uOpen: { value: 0 } },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
         void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
       fragmentShader: /* glsl */ `
-        uniform float uTime, uGlow;
+        uniform float uTime, uGlow, uOpen;
         varying vec2 vUv;
         ${noise}
         ${voronoi}
@@ -200,7 +215,8 @@ export class PortalScene {
           // flares licking off the rim over the stone
           float ang = atan(p.y, p.x);
           float flare = pow(max(noise(vec3(ang * 3.0, uTime * 0.6, 0.0)) - 0.35, 0.0), 2.0) * exp(-pow((r - 3.6) / 0.6, 2.0)) * 2.0;
-          float a = (rim + web * 0.55 + haze + flare) * uGlow;
+          float hole = mix(1.0, smoothstep(0.8, 2.9, r), uOpen);
+          float a = (rim + (web * 0.55 + haze) * hole + flare) * uGlow;
           gl_FragColor = vec4(vec3(0.9, 0.95, 1.0) * a, a);
         }`,
       transparent: true,
@@ -266,19 +282,12 @@ export class PortalScene {
     this.dust.material.uniforms.uPixel.value = (h * pixel * 0.5) / Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
   }
 
-  // Camera depth along the passage: it lingers in front of each portal, then dives through.
   cameraZ(s) {
-    const KEYS = [
-      [0.0, 16], [0.2, 16], [0.3, 11], [0.44, -GAP + 9], [0.52, -GAP + 9],
-      [0.66, -GAP * 2 + 9], [0.76, -GAP * 2 + 9], [1.0, -GAP * 2 - 0.2],
-    ];
-    if (s <= KEYS[0][0]) return KEYS[0][1];
-    for (let i = 1; i < KEYS.length; i++) {
-      const [s1, z1] = KEYS[i];
-      const [s0, z0] = KEYS[i - 1];
-      if (s <= s1) return z0 + (z1 - z0) * smooth(s0, s1, s);
-    }
-    return KEYS[KEYS.length - 1][1];
+    // before the scene's slice (during the cut) keep drifting at the starting speed
+    if (s < 0) return Z_START + (Z_END - Z_START) * PATH[1] * STEPS * s;
+    const x = clamp01(s) * STEPS;
+    const i = Math.min(Math.floor(x), STEPS - 1);
+    return Z_START + (Z_END - Z_START) * (PATH[i] + (PATH[i + 1] - PATH[i]) * (x - i));
   }
 
   update({ t, dt, s, mouseLerp }) {
@@ -301,16 +310,24 @@ export class PortalScene {
     const z = this.cameraZ(s);
     this.spin += dt * 0.12;
 
-    let roll = 0;
     let warp = 0;
     let zoom = 0;
+    let swirl = 0;
     this.portals.forEach((P, i) => {
       const d = z - P.z;
-      // the glyph opens up and spins as the camera closes in, then the membrane
-      // ripples like water while the camera passes through it
+      // a deep swell of air each time the camera crosses a ring
+      if (d > 0 !== this.ahead[i]) {
+        this.ahead[i] = d > 0;
+        sound.pass();
+      }
+      // the glyph turns a little as the camera closes in, and sinks back behind the ring
+      // at the camera's own pace, so it holds its size through the pass instead of flying
+      // past the lens; once through, it dwindles away inside the tunnel
       const near = smooth(12, 2, d) * (d > -2 ? 1 : 0);
       const glow = i === 0 ? glow1 : smooth(GAP - 2, 12, d);
-      P.inner.rotation.z = this.spin * (i % 2 ? -1 : 1) + near * 2.2;
+      P.inner.rotation.z = this.spin * (i % 2 ? -1 : 1) + near * 0.8;
+      P.inner.position.z = -Math.max(0, 10 - d) * 0.9;
+      P.inner.scale.setScalar(Math.max(smooth(-10, -3, d), 0.001));
       for (const pc of P.pieces) {
         if (!pc.inner) continue;
         if (i === 0) {
@@ -320,7 +337,6 @@ export class PortalScene {
           pc.mesh.quaternion.slerpQuaternions(pc.q0, this._q.identity(), e);
           pc.mesh.visible = k > 0.001;
         } else pc.mesh.position.copy(pc.home);
-        pc.mesh.position.addScaledVector(pc.radial, near * 0.7);
         pc.mesh.position.z += Math.sin(t * 0.9 + pc.phase) * 0.06;
       }
       // every stone breathes a little on its own, so the ring never reads as one rigid object
@@ -333,22 +349,29 @@ export class PortalScene {
       if (i > 0) P.ring.rotation.z = Math.sin(t * 0.2 + i) * 0.05;
       P.disc.material.uniforms.uTime.value = t;
       P.disc.material.uniforms.uGlow.value = glow * (1 - smooth(1, -3, d) * 0.7);
+      // the membrane clears from the centre on approach so the next ring shows through
+      P.disc.material.uniforms.uOpen.value = smooth(14, 3, d);
       P.rays.material.uniforms.uTime.value = t + i * 7;
       P.rays.material.uniforms.uGlow.value = glow * smooth(-1, 4, d);
       if (glow > 0.5 && !this.lit[i]) {
         this.lit[i] = true;
-        sound.enter();
+        sound.glow();
       } else if (glow < 0.1) this.lit[i] = false;
-      const pass = Math.exp(-(d * d) / 6);
+      const pass = Math.exp(-(d * d) / 4);
       warp = Math.max(warp, pass);
-      zoom = Math.max(zoom, near * 0.25 + pass * 0.35);
-      roll += smooth(10, -4, d) * 0.6;
+      zoom = Math.max(zoom, pass * 0.1);
+      // through the membrane the view turns into a glowing tunnel, smeared round in
+      // streaks; it builds in the last stretch before the ring and fades well after it
+      const inside = d > 0 ? smooth(1.5, 0, d) : Math.exp(d / 7);
+      if (inside > swirl) {
+        swirl = inside;
+        this.post.swirlDir = i % 2 ? -1 : 1;
+      }
     });
 
     const cam = this.camera;
     cam.position.set(mouseLerp.x * 0.4, 1.2 * (1 - assemble) + mouseLerp.y * 0.25, z);
     cam.lookAt(0, z > 0 ? P1.ring.position.y * 0.4 : 0, z - 20);
-    cam.rotateZ(roll);
     cam.updateMatrixWorld();
 
     const ahead = this.portals.find((P) => P.z < z - 0.5) || this.portals[2];
@@ -365,5 +388,6 @@ export class PortalScene {
     this.backdrop.material.uniforms.uOffset.value.set(mouseLerp.x * 0.01, s * 0.6);
     this.post.zoom = zoom;
     this.post.warp = warp;
+    this.post.swirl = swirl * this.post.swirlDir;
   }
 }

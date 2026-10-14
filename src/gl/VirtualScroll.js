@@ -1,4 +1,11 @@
-// Wheel / touch / keyboard driven 0..1 progress with inertia.
+// Wheel / touch / keyboard driven progress with inertia. It is unbounded: the journey
+// loops, so whole numbers all land on the start (see Experience.tick).
+
+// Progress per pixel of wheel travel: one full loop is about 100 wheel notches.
+const SPEED = 0.00008;
+// How fast the view glides after the target (per second): lower is slower and floatier.
+const FOLLOW = 1.8;
+
 export class VirtualScroll {
   constructor(target) {
     this.target = 0;
@@ -12,21 +19,21 @@ export class VirtualScroll {
       e.preventDefault();
       if (!this.enabled) return;
       const unit = e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? window.innerHeight : 1;
-      this.target += Math.max(-120, Math.min(120, e.deltaY * unit)) * 0.00018;
+      this.target += Math.max(-120, Math.min(120, e.deltaY * unit)) * SPEED;
     };
     this._touchStart = (e) => { touchY = e.touches[0].clientY; };
     this._touchMove = (e) => {
       if (!this.enabled) return;
       const y = e.touches[0].clientY;
-      this.target += (touchY - y) * 0.0007;
+      this.target += (touchY - y) * SPEED * 3.5;
       touchY = y;
     };
     this._key = (e) => {
       if (!this.enabled) return;
-      const step = { ArrowDown: 0.04, PageDown: 0.12, ' ': 0.12, ArrowUp: -0.04, PageUp: -0.12 }[e.key];
+      const step = { ArrowDown: 0.02, PageDown: 0.06, ' ': 0.06, ArrowUp: -0.02, PageUp: -0.06 }[e.key];
       if (step) this.target += step;
-      if (e.key === 'Home') this.target = 0;
-      if (e.key === 'End') this.target = 1;
+      if (e.key === 'Home') this.target = Math.round(this.target);
+      if (e.key === 'End') this.target = Math.floor(this.target) + 0.93;
     };
     target.addEventListener('wheel', this._wheel, { passive: false });
     target.addEventListener('touchstart', this._touchStart, { passive: true });
@@ -35,9 +42,8 @@ export class VirtualScroll {
   }
 
   update(dt) {
-    this.target = Math.min(Math.max(this.target, 0), 1);
     const prev = this.current;
-    this.current += (this.target - this.current) * (1 - Math.exp(-dt * 3.2));
+    this.current += (this.target - this.current) * (1 - Math.exp(-dt * FOLLOW));
     if (Math.abs(this.target - this.current) < 1e-5) this.current = this.target;
     this.velocity = dt > 0 ? (this.current - prev) / dt : 0;
   }

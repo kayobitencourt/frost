@@ -84,44 +84,6 @@ export function createDome() {
   return { mesh, material, blocks, matrices: items.map((it) => it.matrix) };
 }
 
-/* ---------- Cloud banks the camera rises through when leaving the valley ---------- */
-export function createClouds() {
-  const group = new THREE.Group();
-  const material = new THREE.ShaderMaterial({
-    uniforms: { uTime: { value: 0 }, uDensity: { value: 0 } },
-    vertexShader: /* glsl */ `
-      varying vec3 vW;
-      void main() {
-        vW = (modelMatrix * vec4(position, 1.0)).xyz;
-        gl_Position = projectionMatrix * viewMatrix * vec4(vW, 1.0);
-      }`,
-    fragmentShader: /* glsl */ `
-      uniform float uTime, uDensity;
-      varying vec3 vW;
-      ${noise}
-      void main() {
-        vec3 p = vec3(vW.xz * 0.06 + vec2(uTime * 0.02, 0.0), vW.y * 0.1 + uTime * 0.03);
-        float c = fbm(p) + fbm(p * 2.7 + 4.0) * 0.5;
-        float a = smoothstep(0.45, 1.0, c) * uDensity;
-        // soften near the lens so the layers never read as flat planes
-        float d = distance(vW, cameraPosition);
-        a *= smoothstep(0.5, 6.0, d) * (1.0 - smoothstep(40.0, 80.0, d));
-        gl_FragColor = vec4(vec3(0.8, 0.83, 0.87), a * 0.9);
-      }`,
-    transparent: true,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  });
-  for (let i = 0; i < 6; i++) {
-    const plane = new THREE.Mesh(new THREE.PlaneGeometry(160, 160), material);
-    plane.rotation.x = -Math.PI / 2;
-    plane.position.set(0, 1.5 + i * 2.4, -10);
-    plane.renderOrder = 5;
-    group.add(plane);
-  }
-  return { group, material };
-}
-
 /* ---------- Intro: the igloo drawn as a wireframe of brick edges ---------- */
 export function createWireIgloo(matrices) {
   const edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1));

@@ -8,12 +8,14 @@ attribute float aRow;
 attribute float aLift;
 uniform float uTime;
 uniform float uReveal;
+uniform float uAssemble;
 varying vec3 vN;
 varying vec3 vWorld;
 varying vec3 vLocal;
 varying float vRand;
 varying float vLift;
 varying float vReveal;
+varying float vFall;
 
 mat3 rot(vec3 a, float g) {
   a = normalize(a);
@@ -32,8 +34,12 @@ void main() {
 
   // hover lift: the brick pops off the shell and tips over a little
   mat3 T = rot(vec3(aDir.z, 0.0, -aDir.x) + vec3(0.0, 0.0, 0.001), aLift * (0.35 + aRand * 0.4));
-  vec3 p = T * position;
-  vec3 n = T * normal;
+  // rebuild: bricks rain down tumbling and settle into the shell, the bottom rows first
+  float fall = 1.0 - clamp(uAssemble * 1.7 - aRow * 0.5 - aRand * 0.2, 0.0, 1.0);
+  fall *= fall;
+  mat3 R = rot(vec3(sin(aRand * 91.0), cos(aRand * 37.0), sin(aRand * 13.0)), fall * 4.0);
+  vec3 p = R * T * position;
+  vec3 n = R * T * normal;
 
   vec3 center = (modelMatrix * im * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
   vec3 w = (modelMatrix * im * vec4(p, 1.0)).xyz;
@@ -44,6 +50,7 @@ void main() {
   w = center + (w - center) * mix(0.85, 1.0, r);
 
   w += (aDir + vec3(0.0, 0.35, 0.0)) * aLift;
+  w += (aDir * 2.5 + vec3(0.0, 9.0, 0.0)) * fall;
 
   vN = normalize(mat3(modelMatrix) * mat3(im) * n);
   vWorld = w;
@@ -51,6 +58,7 @@ void main() {
   vRand = aRand;
   vLift = aLift;
   vReveal = r;
+  vFall = fall;
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.0);
 }
 `;
@@ -64,6 +72,7 @@ varying vec3 vLocal;
 varying float vRand;
 varying float vLift;
 varying float vReveal;
+varying float vFall;
 const vec3 SUN = normalize(vec3(-0.5, 0.62, 0.6));
 ${noise}
 ${fog}
@@ -112,7 +121,7 @@ void main() {
   col += glint * tint * pow(max(dot(reflect(-V, N), SUN), 0.0), 2.0) * 0.9;
 
   // popped bricks light up white, the brightest at their edges
-  float lifted = clamp(vLift * 1.6, 0.0, 1.0);
+  float lifted = clamp(max(vLift * 1.6, vFall * 2.5), 0.0, 1.0);
   col = mix(col, vec3(1.0, 1.02, 1.05), lifted * (0.55 + 0.45 * seam));
 
   if (vReveal <= 0.001) discard;
@@ -127,6 +136,7 @@ export function createBrickMaterial() {
     uniforms: {
       uTime: { value: 0 },
       uReveal: { value: 0 },
+      uAssemble: { value: 1 },
       uGlow: { value: 0 },
     },
   });

@@ -1,4 +1,5 @@
-// Fully synthesized sound design: wind bed, ambient pad, bells and UI cues.
+// Fully synthesized sound design: a deep wind bed, an ambient pad with a slow soft
+// arpeggio in the low mids, granular glitches for cuts and high ticks for the UI.
 const midi = (n) => 440 * Math.pow(2, (n - 69) / 12);
 
 const CHORDS = [
@@ -6,6 +7,13 @@ const CHORDS = [
   [41, 48, 53, 57, 64, 69],
   [48, 55, 59, 64, 67, 74],
   [40, 47, 52, 55, 62, 67],
+];
+// arpeggio voices per chord, kept around 300-500 Hz
+const ARPS = [
+  [64, 69, 71, 72, 69, 67],
+  [65, 69, 72, 64, 67, 69],
+  [67, 71, 72, 74, 71, 67],
+  [64, 67, 71, 62, 64, 67],
 ];
 const BELLS = [81, 83, 84, 88, 91, 93, 95, 96];
 
@@ -75,24 +83,25 @@ class SoundEngine {
     if (!this.windGain) return;
     this.windLevel += (v - this.windLevel) * 0.05;
     const t = this.ctx.currentTime;
-    this.windGain.gain.setTargetAtTime(0.07 + this.windLevel * 0.25, t, 0.2);
-    this.windFilter.frequency.setTargetAtTime(500 + this.windLevel * 1400, t, 0.3);
+    this.windGain.gain.setTargetAtTime(0.16 + this.windLevel * 0.22, t, 0.2);
+    this.windFilter.frequency.setTargetAtTime(260 + this.windLevel * 700, t, 0.3);
   }
 
   /* ---------------- beds ---------------- */
+  // A heavy low roar, most of its weight below 300 Hz, swelling in slow gusts.
   _startWind() {
     const ctx = this.ctx;
     const src = ctx.createBufferSource();
     src.buffer = this.noise;
     src.loop = true;
     this.windFilter = ctx.createBiquadFilter();
-    this.windFilter.type = 'bandpass';
-    this.windFilter.frequency.value = 500;
-    this.windFilter.Q.value = 0.9;
+    this.windFilter.type = 'lowpass';
+    this.windFilter.frequency.value = 260;
+    this.windFilter.Q.value = 0.7;
     const lfo = ctx.createOscillator();
     lfo.frequency.value = 0.07;
     const lfoAmt = ctx.createGain();
-    lfoAmt.gain.value = 260;
+    lfoAmt.gain.value = 120;
     lfo.connect(lfoAmt).connect(this.windFilter.frequency);
     this.windGain = ctx.createGain();
     this.windGain.gain.value = 0;
@@ -117,8 +126,10 @@ class SoundEngine {
 
   _startMusic() {
     let chord = 0;
+    let step = 0;
     let nextChord = this.ctx.currentTime + 0.2;
-    let nextBell = this.ctx.currentTime + 2;
+    let nextNote = this.ctx.currentTime + 1.5;
+    let nextBell = this.ctx.currentTime + 6;
     const schedule = () => {
       const now = this.ctx.currentTime;
       while (nextChord < now + 1) {
@@ -126,10 +137,17 @@ class SoundEngine {
         chord++;
         nextChord += 8;
       }
+      // soft plucked arpeggio following the chord, with the odd rest
+      while (nextNote < now + 1) {
+        const arp = ARPS[(chord + ARPS.length - 1) % ARPS.length];
+        if (Math.random() > 0.18) this._pluck(midi(arp[step % arp.length]), nextNote, 0.035 + Math.random() * 0.015);
+        step++;
+        nextNote += step % 6 === 0 ? 0.9 : 0.42;
+      }
+      // a distant bell now and then
       while (nextBell < now + 1) {
-        const n = BELLS[Math.floor(Math.random() * BELLS.length)] - (Math.random() < 0.3 ? 12 : 0);
-        this._bell(midi(n), nextBell, 0.05 + Math.random() * 0.05);
-        nextBell += 0.9 + Math.random() * 2.6;
+        this._bell(midi(BELLS[Math.floor(Math.random() * BELLS.length)] - 12), nextBell, 0.025);
+        nextBell += 6 + Math.random() * 8;
       }
     };
     schedule();
@@ -160,6 +178,25 @@ class SoundEngine {
         o.stop(t + dur + 0.1);
       }
     }
+  }
+
+  _pluck(freq, t, vol) {
+    const ctx = this.ctx;
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.value = freq;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(2200, t);
+    lp.frequency.exponentialRampToValueAtTime(600, t + 0.5);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
+    o.connect(lp).connect(g).connect(this.music);
+    g.connect(this.delay);
+    o.start(t);
+    o.stop(t + 1);
   }
 
   _bell(freq, t, vol) {
@@ -235,65 +272,115 @@ class SoundEngine {
     src.stop(t + dur + 0.05);
   }
 
-  // Data-chatter beeps used while text decodes.
+  // Data chatter while text decodes: a fast stutter of very high blips.
   beeps(count = 6) {
     if (!this._ok()) return;
     const now = performance.now();
     if (now - this._lastBeep < 120) return;
     this._lastBeep = now;
-    for (let i = 0; i < count; i++) {
-      const f = 1400 + Math.floor(Math.random() * 8) * 180;
-      this._tone({ type: 'square', f0: f, dur: 0.035, vol: 0.018, at: i * 0.045 });
+    for (let i = 0; i < count * 3; i++) {
+      const f = 6000 + Math.floor(Math.random() * 6) * 900;
+      this._tone({ f0: f, dur: 0.018, vol: 0.012, at: i * 0.026 });
     }
   }
 
   click() {
     if (!this._ok()) return;
-    this._tone({ type: 'triangle', f0: 1100, f1: 320, dur: 0.07, vol: 0.12 });
-    this._tone({ type: 'sine', f0: 2400, dur: 0.03, vol: 0.04, at: 0.02 });
+    this._tone({ type: 'triangle', f0: 1100, f1: 320, dur: 0.07, vol: 0.1 });
+    this._tone({ f0: 5200, dur: 0.02, vol: 0.03, at: 0.01 });
   }
 
+  // UI hover: a tiny glassy tick, the same partials stacked high up.
   hover() {
     if (!this._ok()) return;
-    this._tone({ type: 'sine', f0: 1800, f1: 2100, dur: 0.06, vol: 0.04 });
+    [2700, 5000, 7000, 10000].forEach((f, i) => this._tone({ f0: f, dur: 0.035, vol: 0.016 / (1 + i * 0.4) }));
+  }
+
+  // Lighter tick for words lighting up under the cursor; rate-limited.
+  tick() {
+    if (!this._ok()) return;
+    const now = performance.now();
+    if (now - (this._lastTick || 0) < 60) return;
+    this._lastTick = now;
+    this._tone({ f0: 7000 + Math.random() * 3000, dur: 0.012, vol: 0.008 });
   }
 
   // Crystalline ping for touching ice.
   shard() {
     if (!this._ok()) return;
     const base = midi(BELLS[Math.floor(Math.random() * BELLS.length)]);
-    this._tone({ f0: base, dur: 1.2, vol: 0.06, send: 0.8 });
-    this._tone({ f0: base * 2.76, dur: 0.6, vol: 0.03, send: 0.8 });
-    this._tone({ f0: base * 5.4, dur: 0.25, vol: 0.015, send: 0.8 });
-    this._noiseBurst({ dur: 0.12, vol: 0.05, f0: 7000, f1: 9000, q: 4, type: 'highpass', send: 0.5 });
+    this._tone({ f0: base, dur: 0.9, vol: 0.035, send: 0.8 });
+    this._tone({ f0: base * 2.76, dur: 0.4, vol: 0.018, send: 0.8 });
+    this._noiseBurst({ dur: 0.1, vol: 0.04, f0: 7000, f1: 9000, q: 4, type: 'highpass', send: 0.5 });
   }
 
   whoosh() {
     if (!this._ok()) return;
-    this._noiseBurst({ dur: 1.6, vol: 0.22, f0: 250, f1: 2600, q: 1.2 });
+    this._noiseBurst({ dur: 1.4, vol: 0.14, f0: 200, f1: 1800, q: 1.2 });
   }
 
+  // Granular digital crackle: short noise grains scattered across the spectrum.
+  _grains(count, span, at = 0) {
+    for (let i = 0; i < count; i++) {
+      const f = 800 * Math.pow(15, Math.random());
+      this._noiseBurst({ dur: 0.015 + Math.random() * 0.03, vol: 0.05 + Math.random() * 0.06, f0: f, f1: f * 1.2, q: 3, at: at + Math.random() * span, send: 0.15 });
+    }
+  }
+
+  // Opening a project: the ice crackles apart, a low-mid tone swells as the dark comes in.
   enter() {
     if (!this._ok()) return;
-    this._tone({ type: 'sawtooth', f0: 90, f1: 520, dur: 0.9, vol: 0.05, send: 0.6 });
-    this._noiseBurst({ dur: 1, vol: 0.15, f0: 400, f1: 6000, q: 2 });
-    [0, 4, 7, 11].forEach((s, i) => this._tone({ f0: midi(76 + s), dur: 1.6, vol: 0.04, at: 0.35 + i * 0.07, send: 0.9 }));
+    this._grains(34, 0.9, 0.25);
+    this._noiseBurst({ dur: 0.9, vol: 0.12, f0: 600, f1: 9000, q: 0.8, at: 0.3 });
+    this._swell(midi(71), 0.5, 1.6, 0.06);
+    this._swell(midi(59), 0.55, 1.8, 0.05);
   }
 
   leave() {
     if (!this._ok()) return;
-    this._tone({ type: 'sawtooth', f0: 520, f1: 80, dur: 0.8, vol: 0.05, send: 0.6 });
-    this._noiseBurst({ dur: 0.9, vol: 0.14, f0: 5000, f1: 300, q: 2 });
+    this._grains(26, 0.7);
+    this._noiseBurst({ dur: 0.8, vol: 0.11, f0: 8000, f1: 500, q: 0.8 });
+    this._swell(midi(71), 0.1, 1.2, 0.05);
   }
 
-  // Intro hit: sub drop, ice crack and a bright chord bloom.
-  logo() {
+  _swell(f, at, dur, vol) {
+    const ctx = this.ctx;
+    const t = ctx.currentTime + at;
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.value = f;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + dur * 0.35);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(this.sfx);
+    const s = ctx.createGain();
+    s.gain.value = 0.7;
+    g.connect(s).connect(this.reverbIn);
+    o.start(t);
+    o.stop(t + dur + 0.05);
+  }
+
+  // A portal membrane lighting up: two soft tones swelling together.
+  glow() {
     if (!this._ok()) return;
-    this._tone({ f0: 110, f1: 32, dur: 2.4, vol: 0.5, at: 2.8 });
-    this._noiseBurst({ dur: 0.5, vol: 0.4, f0: 3000, f1: 800, q: 0.6, at: 2.8, send: 0.9 });
-    [69, 76, 81, 83, 88].forEach((n, i) => this._tone({ f0: midi(n), dur: 4, vol: 0.05, at: 2.85 + i * 0.05, send: 1 }));
-    for (let i = 0; i < 14; i++) {
-      this._tone({ f0: 2000 + Math.random() * 3000, dur: 0.08, vol: 0.015, at: 0.4 + i * 0.17, send: 0.6 });
+    this._swell(midi(59), 0, 2.4, 0.045);
+    this._swell(midi(66), 0.12, 2.4, 0.03);
+  }
+
+  // Passing through a portal ring: a deep, soft swell of air.
+  pass() {
+    if (!this._ok()) return;
+    this._tone({ f0: 55, f1: 110, dur: 1.4, vol: 0.18, send: 0.4 });
+    this._noiseBurst({ dur: 1.3, vol: 0.2, f0: 90, f1: 260, q: 0.8, type: 'lowpass', send: 0.3 });
+  }
+
+  // Back across the loop: a stuttering data tone while the bricks rain down and thud home.
+  rebuild() {
+    if (!this._ok()) return;
+    for (let i = 0; i < 48; i++) this._tone({ f0: i % 2 ? 11000 : 10400, dur: 0.014, vol: 0.01, at: 0.2 + i * 0.026 });
+    for (let i = 0; i < 9; i++) {
+      this._noiseBurst({ dur: 0.12, vol: 0.12, f0: 260, f1: 120, q: 0.7, type: 'lowpass', at: 0.35 + i * 0.11 + Math.random() * 0.06, send: 0.2 });
     }
   }
 
