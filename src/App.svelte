@@ -3,7 +3,7 @@
   import gsap from 'gsap';
   import { Experience, CUBE_RANGE } from './gl/Experience.js';
   import { sound } from './audio/Sound.js';
-  import { progress, cubeScreen, hoverCube, project } from './state.js';
+  import { progress, cubeScreen, hoverCube, project, domeLabels, ringLabels } from './state.js';
   import { scramble } from './lib/scramble.js';
   import { SECTIONS, VENTURES, MANIFESTO } from './content.js';
 
@@ -122,7 +122,7 @@
         <span>FROST // SYSTEM BOOT</span>
         <span>{pad(pct)}%</span>
       </div>
-      <h1 class="loader-logo">
+      <h1 class="loader-logo frost">
         {#each 'FROST'.split('') as ch, i}
           <span style="opacity:{Math.min(1, Math.max(0, pct / 20 - i))}">{ch}</span>
         {/each}
@@ -161,7 +161,6 @@
   <nav class="rail">
     {#each SECTIONS as s, i}
       <button class:active={active === i} on:click={() => jump(s)} on:mouseenter={() => sound.hover()}>
-        <span class="num">{pad(i + 1, 2)}</span>
         <span class="lbl">{s.label}</span>
       </button>
     {/each}
@@ -182,32 +181,49 @@
 <!-- ======================= SECTIONS ======================= -->
 {#if started}
   <section class="sec hero" class:on={active === 0}>
-    <p class="kicker" use:scramble={{ active: active === 0, delay: 3200 }}>/// FROST — EST. 2026</p>
-    <h2 use:scramble={{ active: active === 0, delay: 3500, speed: 0.8 }}>Built for the long winter.</h2>
+    <p class="kicker" use:scramble={{ active: active === 0, delay: 3200 }}>/// FROST</p>
+    <h2 class="frost" use:scramble={{ active: active === 0, delay: 3500, speed: 0.8 }}>Built for the long winter.</h2>
     <p class="sub" use:scramble={{ active: active === 0, delay: 3900, speed: 2, beep: false }}>
       A holding company for durable systems and the communities that live inside them.
     </p>
+    <p class="probe">[ HOVER THE IGLOO ]</p>
   </section>
 
+  {#each $domeLabels as l (l.id)}
+    <div class="measure" style="left:{l.x}px;top:{l.y}px">
+      <span class="id">{l.id}</span>
+      <span class="val">Δ <b>{l.d}</b> M</span>
+    </div>
+  {/each}
+
   <section class="sec right" class:on={active === 1}>
-    <p class="kicker" use:scramble={{ active: active === 1 }}>01 // STRUCTURE</p>
-    <h2 use:scramble={{ active: active === 1, delay: 150 }}>Every block carries weight.</h2>
+    <p class="kicker" use:scramble={{ active: active === 1 }}>// STRUCTURE</p>
+    <h2 class="frost" use:scramble={{ active: active === 1, delay: 150 }}>Every block carries weight.</h2>
     <p class="sub" use:scramble={{ active: active === 1, delay: 400, speed: 2.5, beep: false }}>
       Break the shell apart and the light inside keeps burning. Each piece we build is designed to stand on its own and stronger together.
     </p>
   </section>
 
   <section class="sec center" class:on={active === 2}>
-    <p class="kicker" use:scramble={{ active: active === 2 }}>02 // PASSAGE</p>
-    <h2 use:scramble={{ active: active === 2, delay: 150 }}>Through the ring.</h2>
+    <p class="kicker" use:scramble={{ active: active === 2 }}>// PASSAGE</p>
+    <h2 class="frost" use:scramble={{ active: active === 2, delay: 150 }}>Through the halos.</h2>
     <p class="sub" use:scramble={{ active: active === 2, delay: 400, speed: 2.5, beep: false }}>
-      Fragments in orbit. Nothing here is lost, it is only waiting to be reassembled.
+      Three rings, six arms each. Fragments in orbit — nothing here is lost, it is only waiting to be reassembled.
     </p>
   </section>
 
+  {#each $ringLabels as r (r.id)}
+    <div class="halo" class:show={r.visible} class:pulse={r.pulse} style="left:{r.x}px;top:{r.y}px">
+      <span class="id"><i></i>{r.id}</span>
+      <span>Ø <b>{r.diam}</b> M</span>
+      <span>DIST <b>{r.dist}</b> M</span>
+      {#if r.gap}<span>GAP → <b>{r.gap}</b> M</span>{/if}
+    </div>
+  {/each}
+
   <section class="sec top" class:on={active === 3 && $project < 0}>
-    <p class="kicker" use:scramble={{ active: active === 3 && $project < 0 }}>03 // VENTURES</p>
-    <h2 use:scramble={{ active: active === 3 && $project < 0, delay: 150 }}>Frozen in motion.</h2>
+    <p class="kicker" use:scramble={{ active: active === 3 && $project < 0 }}>// VENTURES</p>
+    <h2 class="frost" use:scramble={{ active: active === 3 && $project < 0, delay: 150 }}>Frozen in motion.</h2>
   </section>
 
   {#each $cubeScreen as pos, i}
@@ -225,7 +241,7 @@
   {/each}
 
   <section class="sec manifesto" class:on={active === 4}>
-    <p class="kicker" use:scramble={{ active: active === 4 }}>04 // MANIFESTO</p>
+    <p class="kicker" use:scramble={{ active: active === 4 }}>// MANIFESTO</p>
     {#each MANIFESTO as line, i}
       <p class="m-line" use:scramble={{ active: active === 4, delay: 300 + i * 700, speed: 2.2, beep: i === 0 }}>{line}</p>
     {/each}
@@ -243,7 +259,7 @@
   <aside class="panel">
     <button class="close" on:click={closeProject} on:mouseenter={() => sound.hover()}>[ X ] CLOSE</button>
     <p class="kicker" use:scramble={{ active: true, delay: 500 }}>{v.code} // {v.tag}</p>
-    <h3 use:scramble={{ active: true, delay: 700, speed: 0.7 }}>{v.name}</h3>
+    <h3 class="frost" use:scramble={{ active: true, delay: 700, speed: 0.7 }}>{v.name}</h3>
     <p class="kicker dim" use:scramble={{ active: true, delay: 900, beep: false }}>////// Summary</p>
     <p class="body" use:scramble={{ active: true, delay: 1000, speed: 5, beep: false }}>{v.summary}</p>
     <dl>
@@ -254,4 +270,4 @@
   </aside>
 {/if}
 
-<div class="cursor" bind:this={cursorEl} class:big={$hoverCube >= 0}></div>
+<div class="cursor" bind:this={cursorEl} class:big={$hoverCube >= 0 || $domeLabels.length > 0}></div>

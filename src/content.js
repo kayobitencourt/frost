@@ -1,14 +1,14 @@
 export const SECTIONS = [
-  { id: 'origin', label: 'ORIGIN', range: [0, 0.07], jump: 0 },
-  { id: 'structure', label: 'STRUCTURE', range: [0.13, 0.3], jump: 0.22 },
-  { id: 'passage', label: 'PASSAGE', range: [0.4, 0.54], jump: 0.47 },
-  { id: 'ventures', label: 'VENTURES', range: [0.64, 0.82], jump: 0.73 },
+  { id: 'origin', label: 'ORIGIN', range: [0, 0.06], jump: 0 },
+  { id: 'structure', label: 'STRUCTURE', range: [0.14, 0.34], jump: 0.2 },
+  { id: 'passage', label: 'PASSAGE', range: [0.44, 0.6], jump: 0.5 },
+  { id: 'ventures', label: 'VENTURES', range: [0.66, 0.84], jump: 0.75 },
   { id: 'manifesto', label: 'MANIFESTO', range: [0.88, 1.01], jump: 1 },
 ];
 
 export const VENTURES = [
   {
-    code: 'FROST_CO_01',
+    code: 'FROST_CO',
     name: 'Whiteout',
     tag: 'Signal / Identity',
     summary:
@@ -16,7 +16,7 @@ export const VENTURES = [
     meta: [['Founded', '2023'], ['Stage', 'Live'], ['Focus', 'Identity']],
   },
   {
-    code: 'FROST_CO_02',
+    code: 'FROST_CO',
     name: 'Permafrost',
     tag: 'Storage / Memory',
     summary:
@@ -24,7 +24,7 @@ export const VENTURES = [
     meta: [['Founded', '2024'], ['Stage', 'Beta'], ['Focus', 'Archival']],
   },
   {
-    code: 'FROST_CO_03',
+    code: 'FROST_CO',
     name: 'Rime',
     tag: 'Tools / Creators',
     summary:
